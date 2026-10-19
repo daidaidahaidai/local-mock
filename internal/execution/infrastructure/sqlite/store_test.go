@@ -2,9 +2,39 @@ package sqlite
 
 import (
 	"context"
+	"fmt"
 	"github.com/daidaidahaidai/local-mock/internal/execution/domain"
+	"sync"
 	"testing"
 )
+
+func TestConcurrentOpenAndWrites(t *testing.T) {
+	dir := t.TempDir()
+	var wg sync.WaitGroup
+	for worker := 0; worker < 8; worker++ {
+		wg.Add(1)
+		go func(worker int) {
+			defer wg.Done()
+			for n := 0; n < 10; n++ {
+				s, err := Open(dir)
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				id := fmt.Sprintf("%d-%d", worker, n)
+				err = s.Insert(context.Background(), domain.Run{ID: id, Project: id, Scenario: "concurrent", State: domain.Starting})
+				if err != nil {
+					t.Error(err)
+				}
+				if _, err = s.List(context.Background()); err != nil {
+					t.Error(err)
+				}
+				s.Close()
+			}
+		}(worker)
+	}
+	wg.Wait()
+}
 
 func TestRunSurvivesReopen(t *testing.T) {
 	dir := t.TempDir()

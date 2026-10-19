@@ -3,9 +3,12 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"syscall"
+	"time"
 
 	"github.com/daidaidahaidai/local-mock/internal/execution/domain"
 	_ "modernc.org/sqlite"
@@ -17,6 +20,25 @@ func Open(root string) (*Store, error) {
 	if err := os.MkdirAll(root, 0700); err != nil {
 		return nil, err
 	}
+	// Serialize initial schema/WAL setup across short-lived CLI processes. A WAL
+	// switch is a write operation and can race with another process's first INSERT.
+	initLock, err := os.OpenFile(filepath.Join(root, "state.init.lock"), os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		return nil, err
+	}
+	defer initLock.Close()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		err = syscall.Flock(int(initLock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+		if err == nil {
+			break
+		}
+		if !errors.Is(err, syscall.EWOULDBLOCK) || time.Now().After(deadline) {
+			return nil, fmt.Errorf("database initialization lock: %w", err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	defer syscall.Flock(int(initLock.Fd()), syscall.LOCK_UN)
 	path := filepath.Join(root, "state.db")
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
@@ -28,10 +50,21 @@ func Open(root string) (*Store, error) {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
-	_, err = db.Exec(`PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL;`)
+	_, err = db.Exec(`PRAGMA busy_timeout=5000;`)
 	if err != nil {
 		db.Close()
 		return nil, err
+	}
+	var journal string
+	if err = db.QueryRow(`PRAGMA journal_mode`).Scan(&journal); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if journal != "wal" {
+		if _, err = db.Exec(`PRAGMA journal_mode=WAL`); err != nil {
+			db.Close()
+			return nil, err
+		}
 	}
 	var version int
 	if err = db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {

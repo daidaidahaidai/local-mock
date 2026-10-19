@@ -1,0 +1,9 @@
+apiVersion: localmock/v1alpha1
+kind: Mock
+metadata: {name: payment}
+protocol: grpc
+contract: demo.proto
+service: fixture.Payment
+rules:
+  - method: Charge
+    response: {transaction_id: mock-transaction}

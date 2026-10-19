@@ -11,10 +11,14 @@ type Interface struct {
 	Protocol     string
 	Contract     string
 	ContractHash string
+	Service      string // fully qualified protobuf service, when protocol is grpc
 }
 
 type Endpoint struct{ Port int }
-type Build struct{ Context, Dockerfile string }
+type Build struct {
+	Context, Dockerfile string
+	Args                map[string]string
+}
 type Readiness struct{ Command []string }
 
 type Dependency struct {
@@ -24,7 +28,7 @@ type Dependency struct {
 }
 
 type Implementation struct {
-	Type         string // image or source; mock is a behavior role, independent of packaging
+	Type         string // image, source, or a compiled mock artifact
 	Role         string // real or mock
 	Image        string
 	Build        *Build
@@ -33,4 +37,5 @@ type Implementation struct {
 	Endpoints    map[string]Endpoint
 	Dependencies map[string]Dependency
 	Readiness    Readiness
+	MockBundle   []byte
 }

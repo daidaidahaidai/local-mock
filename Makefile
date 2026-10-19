@@ -1,7 +1,7 @@
 .PHONY: build test vet fmt
 build:
 	mkdir -p bin
-	go build -trimpath -o bin/localmock ./cmd/localmock
+	CGO_ENABLED=0 go build -trimpath -o bin/localmock ./cmd/localmock
 test:
 	go test -race ./...
 vet:

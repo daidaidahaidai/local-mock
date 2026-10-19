@@ -1,0 +1,13 @@
+# Build adaptation only: upstream checkout business code remains unchanged.
+FROM golang:1.27.1-bookworm AS build
+WORKDIR /src
+ARG GOPROXY=https://proxy.golang.org,direct
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /checkoutservice .
+FROM scratch
+COPY --from=build /checkoutservice /checkoutservice
+COPY localmock-health /localmock
+USER 65532:65532
+ENTRYPOINT ["/checkoutservice"]

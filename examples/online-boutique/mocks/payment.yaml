@@ -1,0 +1,9 @@
+apiVersion: localmock/v1alpha1
+kind: Mock
+metadata: {name: payment-success}
+protocol: grpc
+contract: ../../../.localmock/repos/online-boutique/protos/demo.proto
+service: hipstershop.PaymentService
+rules:
+  - method: Charge
+    response: {transaction_id: local-payment-001}

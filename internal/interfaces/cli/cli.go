@@ -51,6 +51,12 @@ func (c CLI) run(ctx context.Context, args []string) (int, error) {
 	if args[0] == "agent" {
 		return c.agent(ctx, args[1:])
 	}
+	if args[0] == "mock" {
+		return c.mock(ctx, args[1:])
+	}
+	if args[0] == "rpc" {
+		return c.rpc(ctx, args[1:])
+	}
 	command := args[0]
 	switch command {
 	case "doctor", "validate", "plan", "up", "ps", "logs", "stop", "down":
@@ -90,7 +96,7 @@ func (c CLI) run(ctx context.Context, args []string) (int, error) {
 		if *file == "" || f.NArg() != 0 {
 			return 2, fmt.Errorf("%s requires -f PATH and no positional arguments", command)
 		}
-		doc, err := loader.Load(*file)
+		doc, err := loader.LoadContext(ctx, *file)
 		if err != nil {
 			return 2, err
 		}
@@ -315,6 +321,9 @@ func (c CLI) help() {
   stop RUN                       stop a container group
   down RUN                       remove owned resources; retain diagnostic artifacts
   agent inspect --repo PATH       inspect source with DeepSeek and read-only tools
+  mock serve -f mock.yaml         run a configured gRPC mock (also packaged by up)
+  mock health --address HOST:PORT check standard gRPC health
+  rpc --address ... --proto ...   invoke a unary gRPC method with a trace ID
   version                        print version
 
 Run commands accept --state DIR, --json and --timeout DURATION.

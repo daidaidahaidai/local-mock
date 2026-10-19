@@ -2,7 +2,7 @@
 
 用 Go 实现的本地服务联调 CLI：通过声明式场景选择真实服务与 mock，管理隔离的 Docker 容器组，并逐步引入独立 Agent 辅助分析与配置。
 
-**当前是首个可运行版本，不是完整六 Agent 系统。** 已实现严格 DSL 校验、依赖绑定、源码/镜像实现、容器组生命周期、SQLite 记录和 DeepSeek Repository Agent。完整能力与限制见 [开发状态](docs/status.md)。
+**当前是可运行的开发版本，不是完整六 Agent 系统。** 已实现严格 DSL 校验、依赖绑定、源码/镜像实现、容器组生命周期、配置式 gRPC mock、SQLite 记录和 DeepSeek Repository Agent。完整能力与限制见 [开发状态](docs/status.md)。
 
 ## 运行条件
 
@@ -24,7 +24,9 @@
 ./bin/localmock down RUN_ID
 ```
 
-示例启动一个真实 HTTP 转发服务和一个自定义代码 mock；调用方通过场景绑定访问 mock。`ps --json` 显示分配在 `127.0.0.1` 上的临时端口，访问调用方 `/` 应返回 `hello from mock`。这个小样例用于生命周期验证；Online Boutique 仍是后续主要服务组。
+示例启动一个真实 HTTP 转发服务和一个自定义代码 mock；调用方通过场景绑定访问 mock。`ps --json` 显示分配在 `127.0.0.1` 上的临时端口，访问调用方 `/` 应返回 `hello from mock`。这个小样例用于生命周期验证。
+
+实际服务组见 [Online Boutique 样例](examples/online-boutique/README.md)：真实 checkout 从源码构建，六个依赖由配置式 gRPC mock 替代，包含成功下单和支付异常两个场景。`localmock rpc` 可以依据 proto 发起请求，并输出 trace ID；完整调用链视图尚未实现。
 
 `up` 等待就绪后退出，容器继续运行。`stop` 停止整组容器；`down` 删除该 Run 的容器、网络及受管理的数据卷，保留诊断文件和历史记录。重复 `down` 安全。启动超时或 Ctrl-C 会尝试清理部分资源；如果 Docker 不可用导致清理失败，恢复后再次执行 `down RUN_ID`。
 

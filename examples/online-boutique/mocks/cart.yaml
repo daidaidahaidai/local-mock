@@ -1,0 +1,13 @@
+apiVersion: localmock/v1alpha1
+kind: Mock
+metadata: {name: cart-fixture}
+protocol: grpc
+contract: ../../../.localmock/repos/online-boutique/protos/demo.proto
+service: hipstershop.CartService
+rules:
+  - method: GetCart
+    response:
+      user_id: local-user
+      items: [{product_id: local-product, quantity: 2}]
+  - method: EmptyCart
+    response: {}

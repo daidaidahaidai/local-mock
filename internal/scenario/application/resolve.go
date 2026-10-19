@@ -20,9 +20,9 @@ func Resolve(s domain.Scenario, services map[string]catalog.Service, inputs map[
 		if err != nil {
 			return spec, err
 		}
-		w := execution.Workload{Service: deployment.Service, Role: impl.Role, Image: impl.Image, Command: impl.Command, Env: env, Readiness: impl.Readiness.Command}
+		w := execution.Workload{Service: deployment.Service, Role: impl.Role, Image: impl.Image, Command: impl.Command, Env: env, Readiness: impl.Readiness.Command, MockBundle: impl.MockBundle}
 		if impl.Build != nil {
-			w.Build = &execution.BuildSpec{Context: impl.Build.Context, Dockerfile: impl.Build.Dockerfile}
+			w.Build = &execution.BuildSpec{Context: impl.Build.Context, Dockerfile: impl.Build.Dockerfile, Args: impl.Build.Args}
 		}
 		for endpoint, hostPort := range deployment.Publish {
 			w.Publish = append(w.Publish, execution.PublishedPort{Target: impl.Endpoints[endpoint].Port, Published: hostPort})

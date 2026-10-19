@@ -1,0 +1,14 @@
+apiVersion: localmock/v1alpha1
+kind: Service
+metadata: {name: email}
+provides:
+  grpc:
+    protocol: grpc
+    service: hipstershop.EmailService
+    contract: ../../../.localmock/repos/online-boutique/protos/demo.proto
+implementations:
+  mock:
+    type: mock
+    role: mock
+    mock: ../mocks/email.yaml
+    endpoints: {grpc: {port: 50051}}

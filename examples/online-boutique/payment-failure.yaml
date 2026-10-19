@@ -1,0 +1,43 @@
+apiVersion: localmock/v1alpha1
+kind: Scenario
+metadata:
+  name: boutique-payment-unavailable
+catalog:
+  - services/checkout.yaml
+  - services/cart.yaml
+  - services/productcatalog.yaml
+  - services/currency.yaml
+  - services/payment.yaml
+  - services/shipping.yaml
+  - services/email.yaml
+deployments:
+  checkout:
+    service: checkout
+    implementation: source
+    publish: {grpc: 0}
+  cart:
+    service: cart
+    implementation: mock
+  productcatalog:
+    service: productcatalog
+    implementation: mock
+  currency:
+    service: currency
+    implementation: mock
+  payment:
+    service: payment
+    implementation: unavailable
+  shipping:
+    service: shipping
+    implementation: mock
+  email:
+    service: email
+    implementation: mock
+bindings:
+  checkout:
+    cart: cart
+    productcatalog: productcatalog
+    currency: currency
+    payment: payment
+    shipping: shipping
+    email: email

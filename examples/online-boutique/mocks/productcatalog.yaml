@@ -1,0 +1,12 @@
+apiVersion: localmock/v1alpha1
+kind: Mock
+metadata: {name: product-fixture}
+protocol: grpc
+contract: ../../../.localmock/repos/online-boutique/protos/demo.proto
+service: hipstershop.ProductCatalogService
+rules:
+  - method: GetProduct
+    response:
+      id: local-product
+      name: Local test product
+      price_usd: {currency_code: USD, units: "10", nanos: 0}

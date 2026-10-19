@@ -1,0 +1,18 @@
+{
+  "user_id": "local-user",
+  "user_currency": "USD",
+  "address": {
+    "street_address": "Test Street",
+    "city": "Test City",
+    "state": "Test State",
+    "country": "Test Country",
+    "zip_code": 100000
+  },
+  "email": "test@example.invalid",
+  "credit_card": {
+    "credit_card_number": "4111111111111111",
+    "credit_card_cvv": 123,
+    "credit_card_expiration_year": 2030,
+    "credit_card_expiration_month": 12
+  }
+}

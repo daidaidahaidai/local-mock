@@ -1,0 +1,8 @@
+syntax = "proto3";
+package fixture;
+service Payment {
+  rpc Charge(Request) returns (Response);
+  rpc Refund(Request) returns (Response);
+}
+message Request { string id = 1; }
+message Response { string transaction_id = 1; }

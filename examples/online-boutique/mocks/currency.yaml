@@ -1,0 +1,9 @@
+apiVersion: localmock/v1alpha1
+kind: Mock
+metadata: {name: currency-fixture}
+protocol: grpc
+contract: ../../../.localmock/repos/online-boutique/protos/demo.proto
+service: hipstershop.CurrencyService
+rules:
+  - method: Convert
+    response: {currency_code: USD, units: "10", nanos: 0}

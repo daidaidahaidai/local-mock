@@ -1,0 +1,19 @@
+apiVersion: localmock/v1alpha1
+kind: Service
+metadata: {name: payment}
+provides:
+  grpc:
+    protocol: grpc
+    service: hipstershop.PaymentService
+    contract: ../../../.localmock/repos/online-boutique/protos/demo.proto
+implementations:
+  mock:
+    type: mock
+    role: mock
+    mock: ../mocks/payment.yaml
+    endpoints: {grpc: {port: 50051}}
+  unavailable:
+    type: mock
+    role: mock
+    mock: ../mocks/payment-failure.yaml
+    endpoints: {grpc: {port: 50051}}

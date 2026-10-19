@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"debug/elf"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -50,8 +52,9 @@ type composeService struct {
 	Logging     logging           `yaml:"logging"`
 }
 type composeBuild struct {
-	Context    string `yaml:"context"`
-	Dockerfile string `yaml:"dockerfile"`
+	Context    string            `yaml:"context"`
+	Dockerfile string            `yaml:"dockerfile"`
+	Args       map[string]string `yaml:"args,omitempty"`
 }
 type port struct {
 	Target    int    `yaml:"target"`
@@ -115,7 +118,18 @@ func (d Driver) Prepare(ctx context.Context, run domain.Run, spec domain.Spec) e
 			if err := copyTree(ctx, w.Build.Context, buildDir); err != nil {
 				return fmt.Errorf("snapshot build %s: %w", name, err)
 			}
-			s.Build = &composeBuild{Context: buildDir, Dockerfile: w.Build.Dockerfile}
+			s.Build = &composeBuild{Context: buildDir, Dockerfile: w.Build.Dockerfile, Args: map[string]string{}}
+			for key, value := range w.Build.Args {
+				s.Build.Args[key] = literal(value)
+			}
+			s.Image = "localmock/" + run.ID + "-" + name + ":local"
+		}
+		if len(w.MockBundle) > 0 {
+			buildDir := filepath.Join(run.Directory, "build", name)
+			if err := prepareMock(buildDir, w.MockBundle); err != nil {
+				return err
+			}
+			s.Build = &composeBuild{Context: buildDir, Dockerfile: "Dockerfile"}
 			s.Image = "localmock/" + run.ID + "-" + name + ":local"
 		}
 		for _, p := range w.Publish {
@@ -174,7 +188,7 @@ func (d Driver) Stop(ctx context.Context, r domain.Run) error {
 	if len(ids) == 0 {
 		return nil
 	}
-	return d.command(ctx, d.Progress, append([]string{"stop", "--time", "10"}, ids...)...)
+	return d.command(ctx, d.Progress, append([]string{"stop", "-t", "10"}, ids...)...)
 }
 func (d Driver) Down(ctx context.Context, r domain.Run) error {
 	// Remove only explicitly labelled resources, even when compose.yaml is absent or edited.
@@ -354,4 +368,50 @@ func Names(spec domain.Spec) []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+func prepareMock(dir string, bundle []byte) error {
+	if runtime.GOOS != "linux" {
+		return fmt.Errorf("packaged mock execution currently requires Linux")
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	f, err := elf.Open(executable)
+	if err != nil {
+		return err
+	}
+	libraries, err := f.ImportedLibraries()
+	f.Close()
+	if err != nil {
+		return err
+	}
+	if len(libraries) > 0 {
+		return fmt.Errorf("configured mocks require a static localmock binary; build with CGO_ENABLED=0")
+	}
+	if err = os.MkdirAll(dir, 0700); err != nil {
+		return err
+	}
+	in, err := os.Open(executable)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.OpenFile(filepath.Join(dir, "localmock"), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0755)
+	if err != nil {
+		return err
+	}
+	_, copyErr := io.Copy(out, in)
+	closeErr := out.Close()
+	if copyErr != nil {
+		return copyErr
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	if err = os.WriteFile(filepath.Join(dir, "bundle.json"), bundle, 0644); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte("FROM scratch\nCOPY localmock /localmock\nCOPY bundle.json /bundle.json\nUSER 65532:65532\nENTRYPOINT [\"/localmock\"]\n"), 0600)
 }

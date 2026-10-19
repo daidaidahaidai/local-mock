@@ -2,15 +2,19 @@ package yaml
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 
 	catalog "github.com/daidaidahaidai/local-mock/internal/catalog/domain"
+	"github.com/daidaidahaidai/local-mock/internal/mocking/infrastructure/grpcmock"
 	scenario "github.com/daidaidahaidai/local-mock/internal/scenario/domain"
 	"gopkg.in/yaml.v3"
 )
@@ -24,13 +28,15 @@ type metadata struct {
 type interfaceDTO struct {
 	Protocol string `yaml:"protocol"`
 	Contract string `yaml:"contract"`
+	Service  string `yaml:"service"`
 }
 type endpointDTO struct {
 	Port int `yaml:"port"`
 }
 type buildDTO struct {
-	Context    string `yaml:"context"`
-	Dockerfile string `yaml:"dockerfile"`
+	Context    string            `yaml:"context"`
+	Dockerfile string            `yaml:"dockerfile"`
+	Args       map[string]string `yaml:"args"`
 }
 type dependencyDTO struct {
 	Service    string   `yaml:"service"`
@@ -43,6 +49,7 @@ type implementationDTO struct {
 	Type         string                   `yaml:"type"`
 	Role         string                   `yaml:"role"`
 	Image        string                   `yaml:"image"`
+	Mock         string                   `yaml:"mock"`
 	Build        *buildDTO                `yaml:"build"`
 	Command      []string                 `yaml:"command"`
 	Env          map[string]string        `yaml:"env"`
@@ -82,6 +89,9 @@ type Document struct {
 }
 
 func Load(path string) (Document, error) {
+	return LoadContext(context.Background(), path)
+}
+func LoadContext(ctx context.Context, path string) (Document, error) {
 	absolute, err := filepath.Abs(path)
 	if err != nil {
 		return Document{}, err
@@ -99,7 +109,7 @@ func Load(path string) (Document, error) {
 	}
 	for _, reference := range raw.Catalog {
 		file := resolve(filepath.Dir(absolute), reference)
-		svc, err := loadService(file, doc.Files)
+		svc, err := loadServiceContext(ctx, file, doc.Files)
 		if err != nil {
 			return doc, fmt.Errorf("catalog %s: %w", reference, err)
 		}
@@ -112,10 +122,34 @@ func Load(path string) (Document, error) {
 	for name, d := range raw.Deployments {
 		doc.Scenario.Deployments[name] = scenario.Deployment{Service: d.Service, Implementation: d.Implementation, Env: d.Config.Env, Publish: d.Publish}
 	}
+	// A mock selection must not require the unselected real implementation's source.
+	for _, name := range sortedKeys(doc.Scenario.Deployments) {
+		deployment := doc.Scenario.Deployments[name]
+		impl := doc.Services[deployment.Service].Implementations[deployment.Implementation]
+		if impl.Build == nil {
+			continue
+		}
+		info, err := os.Stat(impl.Build.Context)
+		if err != nil {
+			return doc, fmt.Errorf("deployment %s: %w", name, err)
+		}
+		if !info.IsDir() {
+			return doc, fmt.Errorf("deployment %s build context is not a directory", name)
+		}
+		file := filepath.Join(impl.Build.Context, impl.Build.Dockerfile)
+		content, err := readFile(file)
+		if err != nil {
+			return doc, fmt.Errorf("deployment %s: %w", name, err)
+		}
+		doc.Files[file] = fmt.Sprintf("%x", sha256.Sum256(content))
+	}
 	return doc, nil
 }
 
 func loadService(path string, files map[string]string) (catalog.Service, error) {
+	return loadServiceContext(context.Background(), path, files)
+}
+func loadServiceContext(ctx context.Context, path string, files map[string]string) (catalog.Service, error) {
 	var raw serviceDTO
 	if err := decode(path, &raw, files); err != nil {
 		return catalog.Service{}, err
@@ -147,7 +181,25 @@ func loadService(path string, files map[string]string) (catalog.Service, error) 
 		}
 		hash := fmt.Sprintf("%x", sha256.Sum256(content))
 		files[contract] = hash
-		svc.Provides[name] = catalog.Interface{Protocol: i.Protocol, Contract: contract, ContractHash: hash}
+		if i.Protocol == "grpc" {
+			if i.Service == "" {
+				return svc, fmt.Errorf("gRPC interface %s requires a fully qualified service", name)
+			}
+			descriptors, inputs, err := grpcmock.Compile(ctx, contract)
+			if err != nil {
+				return svc, err
+			}
+			if _, err = grpcmock.Service(descriptors, i.Service); err != nil {
+				return svc, err
+			}
+			hash = fmt.Sprintf("%x", sha256.Sum256(descriptors))
+			for path, hash := range inputs {
+				files[path] = hash
+			}
+		} else if i.Service != "" {
+			return svc, fmt.Errorf("service qualifier is only supported for gRPC")
+		}
+		svc.Provides[name] = catalog.Interface{Protocol: i.Protocol, Contract: contract, ContractHash: hash, Service: i.Service}
 	}
 	if len(raw.Implementations) == 0 {
 		return svc, fmt.Errorf("at least one implementation is required")
@@ -163,21 +215,14 @@ func loadService(path string, files map[string]string) (catalog.Service, error) 
 		impl := catalog.Implementation{Type: i.Type, Role: i.Role, Image: i.Image, Command: i.Command, Env: i.Env, Endpoints: map[string]catalog.Endpoint{}, Dependencies: map[string]catalog.Dependency{}, Readiness: catalog.Readiness{Command: i.Readiness.Command}}
 		switch i.Type {
 		case "image":
-			if i.Image == "" || i.Build != nil {
+			if i.Image == "" || i.Build != nil || i.Mock != "" {
 				return svc, fmt.Errorf("image implementation %s requires image and forbids build", name)
 			}
 		case "source":
-			if i.Build == nil || i.Image != "" || i.Build.Context == "" || i.Build.Dockerfile == "" {
+			if i.Build == nil || i.Image != "" || i.Mock != "" || i.Build.Context == "" || i.Build.Dockerfile == "" {
 				return svc, fmt.Errorf("source implementation %s requires build context/dockerfile and forbids image", name)
 			}
 			context := resolve(filepath.Dir(path), i.Build.Context)
-			info, err := os.Stat(context)
-			if err != nil {
-				return svc, err
-			}
-			if !info.IsDir() {
-				return svc, fmt.Errorf("build context is not a directory")
-			}
 			if filepath.IsAbs(i.Build.Dockerfile) {
 				return svc, fmt.Errorf("Dockerfile must be relative to build context")
 			}
@@ -186,16 +231,39 @@ func loadService(path string, files map[string]string) (catalog.Service, error) 
 			if err != nil || rel == ".." || len(rel) > 3 && rel[:3] == "../" {
 				return svc, fmt.Errorf("Dockerfile escapes build context")
 			}
-			content, err := readFile(file)
+			for key := range i.Build.Args {
+				if !validEnv(key) {
+					return svc, fmt.Errorf("invalid build argument %s", key)
+				}
+			}
+			impl.Build = &catalog.Build{Context: context, Dockerfile: i.Build.Dockerfile, Args: i.Build.Args}
+		case "mock":
+			if i.Role != "mock" || i.Mock == "" || i.Image != "" || i.Build != nil || len(i.Command) > 0 || len(i.Readiness.Command) > 0 || len(i.Dependencies) > 0 || len(i.Endpoints) != 1 {
+				return svc, fmt.Errorf("configured mock %s requires role mock, one endpoint and mock file; image/build/command/readiness/dependencies are generated", name)
+			}
+			bundle, inputs, _, err := grpcmock.Load(ctx, resolve(filepath.Dir(path), i.Mock))
+			if err != nil {
+				return svc, fmt.Errorf("mock %s: %w", name, err)
+			}
+			for endpoint, value := range i.Endpoints {
+				provided, ok := svc.Provides[endpoint]
+				if !ok || provided.Protocol != "grpc" || provided.ContractHash != fmt.Sprintf("%x", sha256.Sum256(bundle.Descriptors)) || provided.Service != bundle.Service {
+					return svc, fmt.Errorf("mock contract must match its provided gRPC interface")
+				}
+				impl.Readiness.Command = []string{"/localmock", "mock", "health", "--address", "127.0.0.1:" + strconv.Itoa(value.Port)}
+				impl.Command = []string{"mock", "serve", "--bundle", "/bundle.json", "--listen", ":" + strconv.Itoa(value.Port)}
+			}
+			for path, hash := range inputs {
+				files[path] = hash
+			}
+			impl.MockBundle, err = json.Marshal(bundle)
 			if err != nil {
 				return svc, err
 			}
-			files[file] = fmt.Sprintf("%x", sha256.Sum256(content))
-			impl.Build = &catalog.Build{Context: context, Dockerfile: i.Build.Dockerfile}
 		default:
 			return svc, fmt.Errorf("unsupported implementation type %s", i.Type)
 		}
-		if len(i.Readiness.Command) == 0 {
+		if len(impl.Readiness.Command) == 0 {
 			return svc, fmt.Errorf("implementation %s requires a readiness command", name)
 		}
 		for key := range i.Env {

@@ -1,0 +1,9 @@
+apiVersion: localmock/v1alpha1
+kind: Mock
+metadata: {name: email-fixture}
+protocol: grpc
+contract: ../../../.localmock/repos/online-boutique/protos/demo.proto
+service: hipstershop.EmailService
+rules:
+  - method: SendOrderConfirmation
+    response: {}

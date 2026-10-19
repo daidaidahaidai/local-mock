@@ -1,0 +1,61 @@
+apiVersion: localmock/v1alpha1
+kind: Service
+metadata: {name: checkout}
+provides:
+  grpc:
+    protocol: grpc
+    service: hipstershop.CheckoutService
+    contract: ../../../.localmock/repos/online-boutique/protos/demo.proto
+implementations:
+  source:
+    type: source
+    role: real
+    build:
+      context: ../../../.localmock/repos/online-boutique/src/checkoutservice
+      dockerfile: Dockerfile.localmock
+      args:
+        GOPROXY: https://goproxy.cn,direct
+    endpoints: {grpc: {port: 5050}}
+    env:
+      PORT: "5050"
+      ENABLE_TRACING: "0"
+      ENABLE_PROFILER: "0"
+    readiness:
+      command: [/localmock, mock, health, --address, "127.0.0.1:5050"]
+    dependencies:
+      cart:
+        service: cart
+        interfaces: [grpc]
+        inject:
+          env:
+            CART_SERVICE_ADDR: "${dependency.cart.grpc.address}"
+      productcatalog:
+        service: productcatalog
+        interfaces: [grpc]
+        inject:
+          env:
+            PRODUCT_CATALOG_SERVICE_ADDR: "${dependency.productcatalog.grpc.address}"
+      currency:
+        service: currency
+        interfaces: [grpc]
+        inject:
+          env:
+            CURRENCY_SERVICE_ADDR: "${dependency.currency.grpc.address}"
+      payment:
+        service: payment
+        interfaces: [grpc]
+        inject:
+          env:
+            PAYMENT_SERVICE_ADDR: "${dependency.payment.grpc.address}"
+      shipping:
+        service: shipping
+        interfaces: [grpc]
+        inject:
+          env:
+            SHIPPING_SERVICE_ADDR: "${dependency.shipping.grpc.address}"
+      email:
+        service: email
+        interfaces: [grpc]
+        inject:
+          env:
+            EMAIL_SERVICE_ADDR: "${dependency.email.grpc.address}"

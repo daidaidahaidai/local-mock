@@ -1,0 +1,12 @@
+apiVersion: localmock/v1alpha1
+kind: Mock
+metadata: {name: shipping-fixture}
+protocol: grpc
+contract: ../../../.localmock/repos/online-boutique/protos/demo.proto
+service: hipstershop.ShippingService
+rules:
+  - method: GetQuote
+    response:
+      cost_usd: {currency_code: USD, units: "10", nanos: 0}
+  - method: ShipOrder
+    response: {tracking_id: local-shipment-001}

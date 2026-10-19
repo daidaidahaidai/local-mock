@@ -1,6 +1,6 @@
 # DSL v1alpha1
 
-文件使用 `apiVersion: localmock/v1alpha1`。当前支持 `kind: Service` 和 `kind: Scenario`，可运行例子位于 `examples/http-smoke`。
+文件使用 `apiVersion: localmock/v1alpha1`。当前支持 `kind: Service`、`kind: Scenario` 和 `kind: Mock`，可运行例子位于 `examples/http-smoke` 与 `examples/online-boutique`。
 
 解析拒绝未知字段、重复字段、多个 YAML document，以及超过 4 MiB 的定义/契约文件。相对路径以包含引用的 YAML 文件所在目录为基准；Dockerfile 相对于构建上下文。
 
@@ -8,15 +8,18 @@
 
 - `metadata.name`：稳定逻辑服务名。
 - `provides.<interface>.protocol`：http、https、grpc、thrift 或 custom。
-- `provides.<interface>.contract`：本地契约文件，记录 SHA-256。当前仅校验存在性与引用关系，不解析 IDL 的方法兼容性。
-- `implementations.<name>.type`：source 或 image。
+- `provides.<interface>.contract`：本地契约文件，记录 SHA-256。gRPC 会编译 proto 并验证服务存在性，其他协议目前仅校验文件与引用。
+- `provides.<interface>.service`：gRPC 必填的完整 protobuf service 名称。文件名相同不能代替服务契约相同。
+- `implementations.<name>.type`：source、image 或 mock。
 - `implementations.<name>.role`：real 或 mock，独立于打包方式。
-- source 使用 `build.context`、`build.dockerfile`；image 使用 `image`，两者不能混用。
+- source 使用 `build.context`、`build.dockerfile` 和可选 `build.args`；image 使用 `image`；mock 使用 `mock` 引用定义文件，三者不能混用。构建参数会被记录，不应用于传递秘密。
 - `endpoints.<interface>.port`：容器内端口。
 - `env`：实现默认环境变量。
 - `command`：可选容器 command 参数，不覆盖镜像 ENTRYPOINT。
 - `readiness.command`：必填，exec 形式的健康检查；程序必须存在于镜像中。当前默认间隔 1s、超时 3s、重试 30 次。
 - `dependencies.<alias>`：所选实现自己的依赖，包括 `service`、`interfaces` 和 `inject.env`。
+
+配置式 mock 必须使用 `role: mock`，当前只支持一个 gRPC endpoint；command、readiness 自动生成，不能另行声明依赖。自定义代码/镜像 mock 仍可声明自己的接口和依赖。
 
 服务名、接口名、实现名、部署名使用小写字母、数字和连字符，以字母开始，最多 48 字符。
 
@@ -57,6 +60,27 @@ inject:
 
 源码构建产生 Run 专属镜像标签。`down` 保留镜像及构建缓存，不做全局清理。它们可能随使用增长，需后续增加明确的镜像/历史保留命令。
 
+## 配置式 gRPC Mock
+
+```yaml
+apiVersion: localmock/v1alpha1
+kind: Mock
+metadata: {name: payment-error}
+protocol: grpc
+contract: ./demo.proto
+service: hipstershop.PaymentService
+rules:
+  - method: Charge
+    delayMs: 100
+    error: {code: Unavailable, message: simulated outage}
+```
+
+每个方法最多一条固定规则。`response`（protobuf JSON 对象）与 `error` 必须二选一；`delayMs` 可选，范围 0..300000。编译阶段校验方法、响应字段/类型、错误码以及目标 service。缺失规则的已声明方法返回 Unimplemented；没有真实服务回退。暂不支持流式 RPC、请求条件匹配和有状态规则。
+
+执行时将 descriptor set、规则和静态 Linux CLI 打包成独立 mock 镜像，不需要容器联网下载依赖，也不依赖宿主机 proto 文件。CLI 必须用 `CGO_ENABLED=0` 构建。
+
+`localmock rpc --address HOST:PORT --proto demo.proto --method package.Service/Method --data '{}'` 支持明文 unary gRPC 调用，输出响应、状态和 trace ID。日志中的 trace ID 是实际收到的上下文，不推断或补造缺失链路。
+
 ## 当前未支持
 
-内联 mock 规则、自动协议服务生成、Git ref 拉取、配置 profile/秘密引用、数据卷声明、IDL 语义兼容性检查、历史运行精确重放、TUI 和 Trace 展示。mock 目前通过已有镜像或自定义源码实现。
+HTTP 配置式 mock、Thrift/自定义 RPC 适配、Git ref 拉取命令、配置 profile/秘密引用、数据卷声明、跨版本 IDL 兼容性比较、历史运行精确重放、TUI 和完整 Trace 展示。

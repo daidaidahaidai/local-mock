@@ -1,0 +1,9 @@
+apiVersion: localmock/v1alpha1
+kind: Mock
+metadata: {name: payment-unavailable}
+protocol: grpc
+contract: ../../../.localmock/repos/online-boutique/protos/demo.proto
+service: hipstershop.PaymentService
+rules:
+  - method: Charge
+    error: {code: Unavailable, message: simulated payment outage}
