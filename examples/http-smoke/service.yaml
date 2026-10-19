@@ -1,0 +1,40 @@
+apiVersion: localmock/v1alpha1
+kind: Service
+metadata:
+  name: echo
+provides:
+  api:
+    protocol: http
+    contract: ./openapi.yaml
+implementations:
+  real:
+    type: source
+    role: real
+    build:
+      context: ./app
+      dockerfile: Dockerfile
+    endpoints:
+      api:
+        port: 8080
+    dependencies:
+      backend:
+        service: echo
+        interfaces: [api]
+        inject:
+          env:
+            BACKEND_URL: "${dependency.backend.api.url}"
+    readiness:
+      command: [/app, health]
+  mock:
+    type: source
+    role: mock
+    build:
+      context: ./app
+      dockerfile: Dockerfile
+    env:
+      MOCK_RESPONSE: "hello from mock"
+    endpoints:
+      api:
+        port: 8080
+    readiness:
+      command: [/app, health]

@@ -1,0 +1,18 @@
+apiVersion: localmock/v1alpha1
+kind: Scenario
+metadata:
+  name: http-real-with-mock
+catalog:
+  - ./service.yaml
+deployments:
+  caller:
+    service: echo
+    implementation: real
+    publish:
+      api: 0
+  dependency:
+    service: echo
+    implementation: mock
+bindings:
+  caller:
+    backend: dependency

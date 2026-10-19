@@ -1,0 +1,12 @@
+/bin/
+/.localmock/
+/dist/
+/.cache/
+.env
+.env.*
+*.db
+*.db-shm
+*.db-wal
+*.test
+coverage.out
+.DS_Store
