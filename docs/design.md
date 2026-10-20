@@ -20,9 +20,9 @@ Validate YAML structure, domain relationships and supported execution capabiliti
 Use short SQL transactions and a per-run OS lock. Docker actions are outside SQL transactions. Local development scope permits cleaning interrupted resources rather than adopting them. Cleanup only targets the exact run project; it never performs global pruning.
 
 ## Agents
-Repository: inspect code/build/IDL/configuration. Topology: derive dependency graph and propose scenario bindings. Config: resolve environment and configuration. Mock: create replacement behavior. Runtime: prepare executable artifacts and invoke lifecycle use cases. Debug: run tests, inspect evidence and propose explicit changes.
+Repository: inspect code/build/IDL/configuration. Topology: derive dependency graph and propose scenario bindings. Config: resolve environment and configuration. Mock: create replacement behavior. Runtime: propose validated probes and executable intent. Debug: inspect actual observations and propose explicit changes. The deterministic coordinator exports DSL, invokes lifecycle use cases and executes probes; neither agent receives shell or Docker tools.
 
-A deterministic coordinator manages tasks. Each agent has isolated history, versioned inputs, permitted tools and bounded rounds. Tool requests and final artifacts require validation. Missing evidence is reported, not invented. An agent's own claim of success is not a validated artifact.
+A deterministic coordinator manages tasks. Each agent has isolated history, versioned inputs, permitted tools and bounded rounds. The current `agent develop` workflow starts from a seed Scenario with an executable Service catalog; see [agents.md](agents.md). Tool requests and final artifacts require validation. Missing evidence is reported, not invented. An agent's own claim of success is not a validated artifact.
 
 DeepSeek is the first model adapter. The key is read from the process environment only. Provider-specific message fields are retained during tool conversations. JSON output does not replace domain validation.
 

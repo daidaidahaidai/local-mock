@@ -10,6 +10,8 @@
 - SQLite 运行记录、进程间运行锁、状态转换、失败/取消清理及日志保留。
 - Go Agent 工具调用循环、DeepSeek 适配器、轮次/超时限制及独立任务上下文。
 - Repository Agent 的只读目录/文件工具与引用证据校验。
+- 六 Agent 独立上下文和顺序协调：拓扑选择、配置、gRPC Mock 规则、入口探测、基于观测的 Debug 报告。
+- `agent develop` 输出可执行 DSL、多重图、配置快照和阶段记录；显式执行、预算及失败清理。
 - HTTP 真实转发服务 + 自定义代码 mock 的最小样例。
 - 配置式 unary gRPC mock：Go 编译 proto、验证具体 service 与响应、固定返回/错误/延迟、未匹配方法明确失败、自动镜像打包与健康检查。
 - `rpc` 命令和 mock 调用事件记录，实际传播 traceparent。
@@ -17,10 +19,9 @@
 
 ## 尚未实现
 
-- 六 Agent 的完整任务协调及 Topology / Config / Mock / Runtime / Debug 的具体自动化流程。
 - Repository 发现报告到可执行 Service Manifest 的转换与 Git 拉取。
 - 配置式 HTTP mock、Thrift/自定义 RPC 适配、gRPC 流式/条件/状态规则。
-- 通用测试断言命令、OpenTelemetry 调用链收集与查询。
+- 更丰富的测试断言（当前 Agent 流程支持状态码/文本包含）、OpenTelemetry 调用链收集与查询。
 - TUI、历史重放、数据重置、运行产物保留策略。
 
 ## 验证记录
@@ -41,3 +42,12 @@
 - Online Boutique 端到端验收通过：真实 checkout + 六个 mock 完成下单；切换为支付 Unavailable 后请求失败，且没有发货与邮件调用。
 - 上游源码通过 Mac 获取固定 commit 后传到 Debian（Debian 直接 GitHub clone 超时）；业务源码未修改，构建及运行均在 Debian 容器内完成。
 - 未选择的真实实现不要求源码目录已存在，选择后才检查构建材料。
+
+2026-10-20：
+
+- 六 Agent 角色隔离、产物交接、预算停止、启动/断言/模型失败清理及取消测试通过；全量 race tests、vet 与 Linux 构建通过。
+- 脚本化模型 + 真实 Docker 的六 Agent 验收通过：环境覆盖生效、真实请求穿过调用方到达 mock、成功/断言失败都正确清理。
+- 真实 DeepSeek HTTP 流程六 Agent 全部完成：实际响应包含 `hello from six agents`，Debug 引用真实探测及日志，清理成功；共 13,387 tokens。
+- 首次 Boutique 模型验证因上下文用量超过预算而在启动前停止（104,629 tokens，最后一次响应越过 100,000 预算）；随后裁剪角色输入并澄清 Mock 实现类型与名称。
+- 裁剪角色输入、分开总目标与阶段任务，并统一 gRPC 状态码写法后，真实 DeepSeek Boutique 六 Agent 验证通过：保留七个部署，Mock Agent 修改支付规则，真实 checkout 返回预期 Internal 与指定错误文本；探测与支付调用的 trace ID 一致，日志未出现 ShipOrder 或邮件调用；全部容器和网络清理成功。本次 30,390 tokens。
+- 本轮真实 API 验证共 5 次（HTTP 1 次、Boutique 4 次），含上述预算失败和两次阶段拒绝，总用量 185,859 tokens。阶段拒绝均发生在 Docker 启动前；没有把未执行结果标记为成功。

@@ -232,8 +232,11 @@ func (c CLI) manager(root string) (execapp.Manager, *sqlite.Store, error) {
 	return execapp.Manager{Root: absolute, Store: store, Driver: docker.Driver{Progress: c.Err, WaitSeconds: 90}, Locker: lock.Locker{Root: absolute}}, store, nil
 }
 func (c CLI) agent(ctx context.Context, args []string) (int, error) {
+	if len(args) > 0 && args[0] == "develop" {
+		return c.agentWorkflow(ctx, args[1:])
+	}
 	if len(args) == 0 || args[0] != "inspect" {
-		return 2, fmt.Errorf("usage: localmock agent inspect --repo PATH [--output FILE] [--model NAME]")
+		return 2, fmt.Errorf("usage: localmock agent inspect --repo PATH | agent develop -f SCENARIO --repo PATH --task TASK --output DIR [--execute]")
 	}
 	f := flag.NewFlagSet("agent inspect", flag.ContinueOnError)
 	f.SetOutput(c.Err)
@@ -321,6 +324,7 @@ func (c CLI) help() {
   stop RUN                       stop a container group
   down RUN                       remove owned resources; retain diagnostic artifacts
   agent inspect --repo PATH       inspect source with DeepSeek and read-only tools
+  agent develop -f PATH --task ... --output DIR  six-agent workflow; --execute runs probes
   mock serve -f mock.yaml         run a configured gRPC mock (also packaged by up)
   mock health --address HOST:PORT check standard gRPC health
   rpc --address ... --proto ...   invoke a unary gRPC method with a trace ID

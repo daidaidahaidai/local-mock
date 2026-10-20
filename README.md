@@ -1,8 +1,8 @@
 # local-mock
 
-用 Go 实现的本地服务联调 CLI：通过声明式场景选择真实服务与 mock，管理隔离的 Docker 容器组，并逐步引入独立 Agent 辅助分析与配置。
+用 Go 实现的本地服务联调 CLI：通过声明式场景选择真实服务与 mock，管理隔离的 Docker 容器组，由六个独立 Agent 协作分析、配置和验证。
 
-**当前是可运行的开发版本，不是完整六 Agent 系统。** 已实现严格 DSL 校验、依赖绑定、源码/镜像实现、容器组生命周期、配置式 gRPC mock、SQLite 记录和 DeepSeek Repository Agent。完整能力与限制见 [开发状态](docs/status.md)。
+**当前是可运行的开发版本。** 已实现严格 DSL、容器组生命周期、配置式 gRPC mock，以及 Repository → Topology → Config → Mock → Runtime → Debug 六 Agent 工作流。工作流基于已有 Service/Scenario 清单；任意仓库零配置接入和完整调用链仍未实现。完整能力与限制见 [开发状态](docs/status.md)。
 
 ## 运行条件
 
@@ -35,6 +35,19 @@
 所有运行命令支持 `--state DIR`、`--timeout 10m`；结构化命令支持 `--json`。参数必须放在位置参数之前，例如 `down --state ./state RUN_ID`。日志命令输出日志文本。默认状态目录为 `$XDG_STATE_HOME/localmock` 或 `~/.local/state/localmock`，也可通过 `LOCALMOCK_STATE_DIR` 指定。
 
 退出码：`0` 成功，`1` 执行失败，`2` 参数或场景校验失败，`130` 用户中断。进度与错误写入 stderr。
+
+## 多 Agent 工作流
+
+```bash
+./bin/localmock agent develop \
+  --repo examples/http-smoke \
+  -f examples/http-smoke/scenario.yaml \
+  --task '保留真实 caller，把 dependency 的 MOCK_RESPONSE 改为 hello from agents，并验证 GET /' \
+  --output .localmock/agent-demo \
+  --execute --cleanup
+```
+
+默认不启动服务；`--execute` 执行生成的 DSL 和探测，`--cleanup` 在成功后也清理容器组。每个 Agent 的产物、用量、生成的 DSL 和实际观测均落盘。详见 [六 Agent 使用与边界](docs/agents.md)。
 
 ## Repository Agent
 

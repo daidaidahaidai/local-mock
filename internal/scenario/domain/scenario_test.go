@@ -75,3 +75,23 @@ func assertProblem(t *testing.T, problems []Problem, code string) {
 	}
 	t.Fatalf("missing %s: %v", code, problems)
 }
+
+func TestGraphKeepsParallelProtocolsAndDeploymentIdentity(t *testing.T) {
+	s, c := fixture()
+	s.Deployments["other-target"] = Deployment{Service: "payment", Implementation: "mock", Env: map[string]string{"ZONE": "other"}}
+	graph, err := DependencyGraph(s, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(graph.Nodes) != 3 || len(graph.Edges) != 2 {
+		t.Fatalf("lost multigraph structure: %+v", graph)
+	}
+	if graph.Edges[0].Protocol != "grpc" || graph.Edges[1].Protocol != "http" {
+		t.Fatalf("lost parallel protocols: %+v", graph.Edges)
+	}
+	for _, edge := range graph.Edges {
+		if edge.Target != "target" || edge.Dependency != "payment" {
+			t.Fatalf("split whole-service binding: %+v", edge)
+		}
+	}
+}

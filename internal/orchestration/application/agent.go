@@ -56,9 +56,10 @@ type Result struct {
 	Usage   Usage           `json:"usage"`
 }
 type Event struct {
-	Agent string
-	Round int
-	Tool  string
+	Agent           string
+	Round           int
+	Tool            string
+	ValidationError string
 }
 type Runner struct {
 	Model   Model
@@ -121,6 +122,9 @@ func (r Runner) Run(ctx context.Context, definition Definition, input any, tools
 			}
 			if validate != nil {
 				if err = validate(content); err != nil {
+					if r.OnEvent != nil {
+						r.OnEvent(Event{Agent: definition.Name, Round: round, ValidationError: err.Error()})
+					}
 					messages = append(messages, message(map[string]any{"role": "user", "content": "Artifact validation failed: " + err.Error() + ". Correct the artifact using observed evidence."}))
 					continue
 				}
