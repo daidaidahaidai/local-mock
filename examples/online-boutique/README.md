@@ -22,14 +22,13 @@ bash examples/online-boutique/prepare.sh
 
 ## 请求与日志
 
-从 `ps --json` 找到 checkout 的 `5050/tcp` 回环端口：
+使用网络内部的 probe，不需要发布 checkout 端口：
 
 ```bash
-./bin/localmock rpc \
-  --address 127.0.0.1:PORT \
-  --proto .localmock/repos/online-boutique/protos/demo.proto \
+./bin/localmock probe \
+  --deployment checkout --interface grpc \
   --method hipstershop.CheckoutService/PlaceOrder \
-  --data-file examples/online-boutique/request.json
+  --data-file examples/online-boutique/request.json RUN_ID
 ./bin/localmock logs RUN_ID
 ./bin/localmock down RUN_ID
 ```
@@ -40,7 +39,7 @@ bash examples/online-boutique/prepare.sh
 
 ## 追踪能力边界
 
-`rpc` 为请求生成 trace ID，并通过 W3C traceparent 元数据传入。mock 输出方法、匹配结果、状态、耗时和收到的 trace ID，不记录银行卡等请求正文。
+`probe` 为请求生成 trace ID，并通过 W3C traceparent 元数据传入。mock 输出方法、匹配结果、状态、耗时和收到的 trace ID，不记录银行卡等请求正文。
 
 这些事件用于联调证据，尚不是完整 OpenTelemetry span 图。当前上游 checkout 的 `convertCurrency` 使用 `context.TODO()`，会丢失继承的上下文；汇率 mock 事件可能没有相同 trace ID。样例保留这一行为，避免伪造完整链路。调用链收集与缺口展示仍待实现。
 

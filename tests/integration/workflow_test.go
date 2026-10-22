@@ -55,7 +55,7 @@ func (m *workflowModel) Complete(_ context.Context, messages []agent.Message, to
 		}
 		content = `{"services":[{"name":"echo","language":"Go","build_files":[],"contract_files":[],"config_files":["service.yaml"],"evidence":["service.yaml"]}],"unknowns":[]}`
 	case "Topology":
-		content = `{"name":"agent-http","deployments":{"caller":{"service":"echo","implementation":"real","publish":{"api":0}},"dependency":{"service":"echo","implementation":"mock"}},"bindings":{"caller":{"backend":"dependency"}},"reason":"whole dependency mock"}`
+		content = `{"name":"agent-http","deployments":{"caller":{"service":"echo","implementation":"real"},"dependency":{"service":"echo","implementation":"mock"}},"bindings":{"caller":{"backend":"dependency"}},"reason":"whole dependency mock"}`
 	case "Config":
 		content = `{"env":{"dependency":{"MOCK_RESPONSE":"from-agent-workflow"}},"reason":"test marker"}`
 	case "Mock":
@@ -98,7 +98,7 @@ func TestSixAgentWorkflowRealDocker(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer store.Close()
-			manager := execapp.Manager{Root: h.state, Store: store, Driver: docker.Driver{Progress: io.Discard, WaitSeconds: 90}, Locker: lock.Locker{Root: h.state}}
+			manager := execapp.Manager{Root: h.state, Store: store, Driver: docker.Driver{Progress: io.Discard, WaitSeconds: 90, Executable: h.bin}, Locker: lock.Locker{Root: h.state}}
 			executor := &workflow.Executor{Manager: manager}
 			model := &workflowModel{failProbe: failure, roles: map[string]bool{}}
 			result, err := (agent.Workflow{Runner: agent.Runner{Model: model}, Project: project, Executor: executor}).Run(ctx, agent.WorkflowRequest{Task: "forward a request to configured mock", MaxRounds: 3, MaxTokens: 100, Execute: true, Cleanup: true})

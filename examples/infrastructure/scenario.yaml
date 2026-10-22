@@ -1,0 +1,43 @@
+apiVersion: localmock/v1alpha1
+kind: Scenario
+metadata:
+  name: selected-infrastructure
+# Delete any component you do not need. Nothing is selected by an Agent.
+components:
+  nacos:
+    roles: [registry, config]
+    image: nacos/nacos-server:v2.5.1
+    ipOffset: 10
+    memoryMB: 1024
+    env:
+      MODE: standalone
+      PREFER_HOST_MODE: hostname
+      NACOS_AUTH_ENABLE: "false"
+      JVM_XMS: 256m
+      JVM_XMX: 512m
+      JVM_XMN: 128m
+    endpoints: {http: 8848, grpc: 9848}
+    readiness:
+      command: [curl, -fsS, "http://127.0.0.1:8848/nacos/v1/console/health/readiness"]
+  mysql:
+    roles: [database]
+    image: mysql:8.4.11
+    ipOffset: 30
+    memoryMB: 1024
+    env:
+      MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
+      MYSQL_DATABASE: localmock
+      MYSQL_ROOT_HOST: "%"
+      MYSQL_INITDB_SKIP_TZINFO: "1"
+    endpoints: {sql: 3306}
+    readiness:
+      command: [mysqladmin, ping, --host=127.0.0.1, --user=root, --silent]
+  redis:
+    roles: [cache]
+    image: redis:7.4.9-alpine
+    ipOffset: 40
+    memoryMB: 256
+    command: [redis-server, --save, "", --appendonly, "no"]
+    endpoints: {redis: 6379}
+    readiness:
+      command: [redis-cli, ping]

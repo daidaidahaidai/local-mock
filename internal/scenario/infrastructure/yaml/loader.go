@@ -81,7 +81,30 @@ type scenarioDTO struct {
 	Catalog     []string                     `yaml:"catalog"`
 	Deployments map[string]deploymentDTO     `yaml:"deployments"`
 	Bindings    map[string]map[string]string `yaml:"bindings"`
+	Components  map[string]componentDTO      `yaml:"components,omitempty"`
 }
+type componentDTO struct {
+	Roles     []string          `yaml:"roles"`
+	Image     string            `yaml:"image"`
+	Command   []string          `yaml:"command,omitempty"`
+	Env       map[string]string `yaml:"env,omitempty"`
+	Endpoints map[string]int    `yaml:"endpoints"`
+	IPOffset  int               `yaml:"ipOffset"`
+	MemoryMB  int               `yaml:"memoryMB,omitempty"`
+	Readiness struct {
+		Command []string `yaml:"command"`
+	} `yaml:"readiness"`
+}
+
+func componentFromDTO(c componentDTO) catalog.Component {
+	return catalog.Component{Roles: c.Roles, Image: c.Image, Command: c.Command, Env: c.Env, Endpoints: c.Endpoints, IPOffset: c.IPOffset, MemoryMB: c.MemoryMB, Readiness: c.Readiness.Command}
+}
+func componentToDTO(c catalog.Component) componentDTO {
+	v := componentDTO{Roles: c.Roles, Image: c.Image, Command: c.Command, Env: c.Env, Endpoints: c.Endpoints, IPOffset: c.IPOffset, MemoryMB: c.MemoryMB}
+	v.Readiness.Command = c.Readiness
+	return v
+}
+
 type Document struct {
 	Scenario scenario.Scenario
 	Services map[string]catalog.Service
@@ -104,8 +127,8 @@ func LoadContext(ctx context.Context, path string) (Document, error) {
 	if raw.APIVersion != Version || raw.Kind != "Scenario" {
 		return doc, fmt.Errorf("expected %s Scenario", Version)
 	}
-	if len(raw.Catalog) == 0 {
-		return doc, fmt.Errorf("catalog must not be empty")
+	if len(raw.Catalog) == 0 && len(raw.Components) == 0 {
+		return doc, fmt.Errorf("catalog must not be empty unless components are explicitly selected")
 	}
 	for _, reference := range raw.Catalog {
 		file := resolve(filepath.Dir(absolute), reference)
@@ -119,6 +142,10 @@ func LoadContext(ctx context.Context, path string) (Document, error) {
 		doc.Services[svc.Name] = svc
 	}
 	doc.Scenario = scenario.Scenario{Name: raw.Metadata.Name, Deployments: map[string]scenario.Deployment{}, Bindings: raw.Bindings}
+	doc.Scenario.Components = map[string]catalog.Component{}
+	for name, c := range raw.Components {
+		doc.Scenario.Components[name] = componentFromDTO(c)
+	}
 	for name, d := range raw.Deployments {
 		doc.Scenario.Deployments[name] = scenario.Deployment{Service: d.Service, Implementation: d.Implementation, Env: d.Config.Env, Publish: d.Publish}
 	}
@@ -181,6 +208,7 @@ func loadServiceContext(ctx context.Context, path string, files map[string]strin
 		}
 		hash := fmt.Sprintf("%x", sha256.Sum256(content))
 		files[contract] = hash
+		var compiled []byte
 		if i.Protocol == "grpc" {
 			if i.Service == "" {
 				return svc, fmt.Errorf("gRPC interface %s requires a fully qualified service", name)
@@ -193,13 +221,14 @@ func loadServiceContext(ctx context.Context, path string, files map[string]strin
 				return svc, err
 			}
 			hash = fmt.Sprintf("%x", sha256.Sum256(descriptors))
+			compiled = descriptors
 			for path, hash := range inputs {
 				files[path] = hash
 			}
 		} else if i.Service != "" {
 			return svc, fmt.Errorf("service qualifier is only supported for gRPC")
 		}
-		svc.Provides[name] = catalog.Interface{Protocol: i.Protocol, Contract: contract, ContractHash: hash, Service: i.Service}
+		svc.Provides[name] = catalog.Interface{Protocol: i.Protocol, Contract: contract, ContractHash: hash, Service: i.Service, Descriptors: compiled}
 	}
 	if len(raw.Implementations) == 0 {
 		return svc, fmt.Errorf("at least one implementation is required")

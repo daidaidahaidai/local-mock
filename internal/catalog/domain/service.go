@@ -12,6 +12,7 @@ type Interface struct {
 	Contract     string
 	ContractHash string
 	Service      string // fully qualified protobuf service, when protocol is grpc
+	Descriptors  []byte `json:"-"` // compiled contract for network-local probes
 }
 
 type Endpoint struct{ Port int }

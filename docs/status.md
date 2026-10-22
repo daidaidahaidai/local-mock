@@ -5,8 +5,10 @@
 - Go 模块化单体；领域模型独立于 YAML、SQL、Docker 和模型 SDK。
 - Service / Scenario 严格 YAML 加载、域规则校验、地址注入和执行规格解析。
 - 真实与 mock 实现统一使用 source/image 打包方式，依赖由实现声明。
-- `doctor / validate / plan / up / ps / logs / stop / down / version`。
-- 每个 Run 独立 Compose 项目，标签限定资源清理，默认仅发布到回环地址。
+- `doctor / validate / plan / components / up / probe / ps / logs / stop / down / version`。
+- 每个 Run 独立 Compose 项目和 internal + isolated 自定义网络；无宿主机端口发布；标签限定资源清理。
+- 显式 components 选择、Nacos/MySQL/Redis 镜像模板、自定义镜像、组件地址引用、固定 IP 槽位。
+- 网络内 HTTP/gRPC/TCP probe，Agent 探测使用相同接口；启动及探测前检查实际隔离配置。
 - SQLite 运行记录、进程间运行锁、状态转换、失败/取消清理及日志保留。
 - Go Agent 工具调用循环、DeepSeek 适配器、轮次/超时限制及独立任务上下文。
 - Repository Agent 的只读目录/文件工具与引用证据校验。
@@ -19,6 +21,8 @@
 
 ## 尚未实现
 
+- 自动识别/改写任意注册中心 SDK 配置，Dubbo Provider/元数据适配，以及注册数据的声明式初始化。组件容器可运行不等于业务自动接入。
+- 组件配置文件挂载、SQL/缓存数据导入、持久数据卷和跨 Run 数据复用。
 - Repository 发现报告到可执行 Service Manifest 的转换与 Git 拉取。
 - 配置式 HTTP mock、Thrift/自定义 RPC 适配、gRPC 流式/条件/状态规则。
 - 更丰富的测试断言（当前 Agent 流程支持状态码/文本包含）、OpenTelemetry 调用链收集与查询。
@@ -51,3 +55,14 @@
 - 首次 Boutique 模型验证因上下文用量超过预算而在启动前停止（104,629 tokens，最后一次响应越过 100,000 预算）；随后裁剪角色输入并澄清 Mock 实现类型与名称。
 - 裁剪角色输入、分开总目标与阶段任务，并统一 gRPC 状态码写法后，真实 DeepSeek Boutique 六 Agent 验证通过：保留七个部署，Mock Agent 修改支付规则，真实 checkout 返回预期 Internal 与指定错误文本；探测与支付调用的 trace ID 一致，日志未出现 ShipOrder 或邮件调用；全部容器和网络清理成功。本次 30,390 tokens。
 - 本轮真实 API 验证共 5 次（HTTP 1 次、Boutique 4 次），含上述预算失败和两次阶段拒绝，总用量 185,859 tokens。阶段拒绝均发生在 Docker 启动前；没有把未执行结果标记为成功。
+
+
+2026-10-21～22，Debian amd64，Docker Engine 29.8.2，Compose 5.6.0：
+
+- 增加用户显式选择的基础组件，提供 Nacos `v2.5.1`、MySQL `8.4.11`、Redis `7.4.9-alpine` 模板；自定义名称/镜像使用同一执行路径。支持只启动组件的场景。
+- Run 改为 Runtime 管理的 internal + isolated bridge；组件固定 IP 槽位、业务内部 DNS、无宿主机端口发布。CLI 和 Agent 的 HTTP/gRPC 探测迁入网络内部工具容器。
+- 实际连通性验收：本 Run 服务正常；其他 Run、宿主机各 IPv4 地址的自建 canary 均不可达；未知域名不能解析连接。没有使用线上服务作为探测目标。
+- 真实 Nacos 注册/发现、配置发布/读取，MySQL 建表写入查询，Redis SET/GET，以及组件与业务容器共同启动通过。Nacos 配置缓存异步更新，验收只在限定时间内轮询读取，不重放写入。
+- 独立 MySQL/Redis 场景及 TCP probe 通过；down 后确认 MySQL 匿名数据卷删除。
+- 单元/race、vet、静态 CLI 构建通过；原有双 Run、stop/down、超时/SIGINT 回滚、六 Agent 成功/断言失败清理，以及 Boutique 下单/支付异常回归通过。
+- Mac 仅编辑和同步；构建与容器测试均在 Debian 执行。本轮未调用付费模型。测试资源按 Run 清理，镜像和构建缓存保留。

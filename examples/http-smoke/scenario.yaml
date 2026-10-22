@@ -8,8 +8,6 @@ deployments:
   caller:
     service: echo
     implementation: real
-    publish:
-      api: 0
   dependency:
     service: echo
     implementation: mock

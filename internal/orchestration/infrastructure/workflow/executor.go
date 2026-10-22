@@ -2,20 +2,13 @@ package workflow
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net"
-	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
 	execapp "github.com/daidaidahaidai/local-mock/internal/execution/application"
 	execution "github.com/daidaidahaidai/local-mock/internal/execution/domain"
-	"github.com/daidaidahaidai/local-mock/internal/mocking/infrastructure/grpcmock"
 	"github.com/daidaidahaidai/local-mock/internal/orchestration/domain"
 	scenarioapp "github.com/daidaidahaidai/local-mock/internal/scenario/application"
 	loader "github.com/daidaidahaidai/local-mock/internal/scenario/infrastructure/yaml"
@@ -48,12 +41,9 @@ func (e *Executor) Execute(ctx context.Context, file string, r domain.Runtime) (
 		return evidence, err
 	}
 	evidence.Observations = append(evidence.Observations, domain.Observation{ID: "containers", Kind: "containers", Detail: string(status)})
-	var containers []struct {
-		Deployment string                                         `json:"deployment"`
-		Ports      map[string][]struct{ HostIP, HostPort string } `json:"ports"`
-	}
-	if err = json.Unmarshal(status, &containers); err != nil {
-		return evidence, err
+	prober, ok := e.Manager.Driver.(execapp.Prober)
+	if !ok {
+		return evidence, fmt.Errorf("runtime does not support network-local probes")
 	}
 	for _, probe := range r.Probes {
 		if err = ctx.Err(); err != nil {
@@ -62,35 +52,14 @@ func (e *Executor) Execute(ctx context.Context, file string, r domain.Runtime) (
 		d := doc.Scenario.Deployments[probe.Deployment]
 		svc := doc.Services[d.Service]
 		contract := svc.Provides[probe.Interface]
-		port := svc.Implementations[d.Implementation].Endpoints[probe.Interface].Port
-		address := ""
-		for _, c := range containers {
-			if c.Deployment != probe.Deployment {
-				continue
-			}
-			for _, binding := range c.Ports[strconv.Itoa(port)+"/tcp"] {
-				if binding.HostIP == "127.0.0.1" {
-					n, parseErr := strconv.Atoi(binding.HostPort)
-					if parseErr == nil && n > 0 && n < 65536 {
-						address = net.JoinHostPort("127.0.0.1", binding.HostPort)
-					}
-				}
-			}
-		}
-		code, detail := "", "no loopback port found for selected deployment"
-		callCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-		if address != "" {
-			if contract.Protocol == "http" {
-				code, detail = probeHTTP(callCtx, address, probe.Path)
-			} else {
-				result, callErr := grpcmock.Invoke(callCtx, address, contract.Contract, probe.Method, probe.Request)
-				code = result.Code
-				b, _ := json.Marshal(result)
-				detail = string(b)
-				if callErr != nil {
-					detail += "\n" + callErr.Error()
-				}
-			}
+		callCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+		result, callErr := prober.Probe(callCtx, e.Run, execution.Probe{Deployment: probe.Deployment, Interface: probe.Interface, Path: probe.Path, Method: probe.Method, Request: probe.Request})
+		code := result.Code
+		b, _ := json.Marshal(result)
+		detail := string(b)
+		if callErr != nil {
+			code = ""
+			detail = callErr.Error()
 		}
 		cancel()
 		expected := probe.ExpectCode
@@ -115,38 +84,6 @@ func (e *Executor) Cleanup() error {
 	defer cancel()
 	_, err := e.Manager.Down(ctx, e.Run.ID)
 	return err
-}
-func probeHTTP(ctx context.Context, address, path string) (string, string) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+address+path, nil)
-	if err != nil {
-		return "", err.Error()
-	}
-	var trace [16]byte
-	var span [8]byte
-	if _, err = rand.Read(trace[:]); err != nil {
-		return "", err.Error()
-	}
-	if _, err = rand.Read(span[:]); err != nil {
-		return "", err.Error()
-	}
-	traceID := hex.EncodeToString(trace[:])
-	req.Header.Set("traceparent", "00-"+traceID+"-"+hex.EncodeToString(span[:])+"-01")
-	transport := &http.Transport{Proxy: nil}
-	defer transport.CloseIdleConnections()
-	client := &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", err.Error()
-	}
-	defer resp.Body.Close()
-	b, err := io.ReadAll(io.LimitReader(resp.Body, 32769))
-	if err != nil {
-		return "", err.Error()
-	}
-	if len(b) > 32768 {
-		return "", "response exceeds 32 KiB"
-	}
-	return strconv.Itoa(resp.StatusCode), "trace_id=" + traceID + "\n" + string(b)
 }
 
 // Continue consuming output after the cap so verbose containers cannot break log capture.

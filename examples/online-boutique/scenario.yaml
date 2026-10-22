@@ -14,7 +14,6 @@ deployments:
   checkout:
     service: checkout
     implementation: source
-    publish: {grpc: 0}
   cart:
     service: cart
     implementation: mock

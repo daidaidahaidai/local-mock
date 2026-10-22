@@ -16,7 +16,7 @@
 - `endpoints.<interface>.port`：容器内端口。
 - `env`：实现默认环境变量。
 - `command`：可选容器 command 参数，不覆盖镜像 ENTRYPOINT。
-- `readiness.command`：必填，exec 形式的健康检查；程序必须存在于镜像中。当前默认间隔 1s、超时 3s、重试 30 次。
+- `readiness.command`：必填，exec 形式的健康检查；程序必须存在于镜像中。当前默认间隔 2s、超时 3s、重试 60 次，启动宽限期 5s。
 - `dependencies.<alias>`：所选实现自己的依赖，包括 `service`、`interfaces` 和 `inject.env`。
 
 配置式 mock 必须使用 `role: mock`，当前只支持一个 gRPC endpoint；command、readiness 自动生成，不能另行声明依赖。自定义代码/镜像 mock 仍可声明自己的接口和依赖。
@@ -41,7 +41,8 @@ inject:
 - `deployments.<name>.service`：逻辑服务。
 - `deployments.<name>.implementation`：该服务已定义的实现名称。
 - `deployments.<name>.config.env`：普通配置覆盖。
-- `deployments.<name>.publish`：接口名到宿主机端口的映射；0 为临时端口，固定绑定 127.0.0.1。
+- `deployments.<name>.publish`：旧字段，非空时拒绝执行；改用 `localmock probe` 在隔离网络内部访问接口。
+- `components`：用户手动选择的镜像基础组件，字段、地址引用和 IP 槽位见 [组件与网络](components.md)。
 - `bindings.<caller>.<dependency>`：目标部署名。
 
 一个调用方对同一逻辑服务只能声明一项依赖；这一项可以包含多个协议接口。所有接口共享同一目标部署。禁止将一个目标服务拆成两个依赖来绕过统一替换规则。
@@ -56,7 +57,7 @@ inject:
 
 生成的 Compose 文件是执行产物，不是用户的编辑入口。环境变量中的 `$` 被转义，避免 Compose 隐式读取宿主机变量。场景不支持任意 Compose 片段、宿主机目录挂载、特权模式或 Docker socket 挂载。
 
-当前运行限制固定为每容器 1 CPU、512 MiB、256 PIDs；日志轮转为 10 MiB × 3。后续根据真实样例暴露可配置资源规格。
+业务容器默认 1 CPU、512 MiB、256 PIDs；组件可设置 `memoryMB`（64–16384）。日志轮转为 10 MiB × 3。探测容器使用独立的小资源配额。
 
 源码构建产生 Run 专属镜像标签。`down` 保留镜像及构建缓存，不做全局清理。它们可能随使用增长，需后续增加明确的镜像/历史保留命令。
 

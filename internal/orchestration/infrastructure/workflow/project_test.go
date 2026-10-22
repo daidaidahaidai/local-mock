@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/daidaidahaidai/local-mock/internal/catalog/infrastructure/components"
+	probeimpl "github.com/daidaidahaidai/local-mock/internal/execution/infrastructure/probe"
 	"github.com/daidaidahaidai/local-mock/internal/orchestration/domain"
 	scenario "github.com/daidaidahaidai/local-mock/internal/scenario/domain"
 	loader "github.com/daidaidahaidai/local-mock/internal/scenario/infrastructure/yaml"
@@ -118,7 +120,7 @@ kind: Scenario
 metadata: {name: grpc-example}
 catalog: [service.yaml]
 deployments:
-  echo: {service: echo, implementation: mock, publish: {grpc: 0}}
+  echo: {service: echo, implementation: mock}
 `)
 	p, err := New(context.Background(), root, filepath.Join(root, "scenario.yaml"), filepath.Join(root, "out"))
 	if err != nil {
@@ -168,8 +170,45 @@ func TestHTTPProbeDoesNotFollowRedirects(t *testing.T) {
 		http.Redirect(w, r, external.URL, 302)
 	}))
 	defer local.Close()
-	code, _ := probeHTTP(context.Background(), strings.TrimPrefix(local.URL, "http://"), "/")
+	code := probeimpl.HTTP(context.Background(), strings.TrimPrefix(local.URL, "http://"), "/").Code
 	if code != "302" || reached {
 		t.Fatalf("code=%s followed=%v", code, reached)
+	}
+}
+
+func TestUserComponentSelectionSurvivesAgentHandoffs(t *testing.T) {
+	p := smokeProject(t)
+	p.Seed.Components = components.Templates()
+	p.Doc.Scenario.Components = p.Seed.Components
+	d := p.Seed.Deployments["caller"]
+	d.Env = map[string]string{"REGISTRY": "${component.nacos.http.address}"}
+	p.Seed.Deployments["caller"] = d
+	top := topologyOf(p.Seed)
+	top.Reason = "keep services"
+	if err := p.CheckTopology(top); err != nil {
+		t.Fatal(err)
+	}
+	p.ApplyTopology(top)
+	if err := p.CheckConfig(domain.Config{Reason: "override", Env: map[string]map[string]string{"caller": {"REGISTRY": "elsewhere:8848"}}}); err == nil {
+		t.Fatal("agent replaced user component binding")
+	}
+	config := domain.Config{Reason: "no additional configuration", Env: map[string]map[string]string{}}
+	if err := p.CheckConfig(config); err != nil {
+		t.Fatal(err)
+	}
+	p.ApplyConfig(config)
+	if len(p.Doc.Scenario.Components) != 3 || p.Doc.Scenario.Deployments["caller"].Env["REGISTRY"] != "${component.nacos.http.address}" {
+		t.Fatal("lost user selections")
+	}
+	file, err := p.Export(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := loader.Load(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(doc.Scenario.Components) != 3 {
+		t.Fatal("components missing from exported DSL")
 	}
 }

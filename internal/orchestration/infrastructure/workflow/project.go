@@ -155,7 +155,7 @@ func (p *Project) Context(role string) any {
 	}
 	if role == "runtime" {
 		for _, d := range p.Doc.Scenario.Deployments {
-			for iface := range d.Publish {
+			for iface := range p.Doc.Services[d.Service].Implementations[d.Implementation].Endpoints {
 				if s, ok := p.schemas[d.Service+"."+iface]; ok {
 					schemas[d.Service+"."+iface] = s
 				}
@@ -166,6 +166,11 @@ func (p *Project) Context(role string) any {
 		return map[string]any{"selected": topologyOf(p.Doc.Scenario)}
 	}
 	result := map[string]any{"catalog": catalog, "selected": topologyOf(p.Doc.Scenario)}
+	components := map[string]any{}
+	for name, c := range p.Seed.Components {
+		components[name] = map[string]any{"roles": c.Roles, "endpoints": c.Endpoints, "image": c.Image}
+	}
+	result["user_selected_components_read_only"] = components
 	if role == "topology" {
 		result["seed"] = topologyOf(p.Seed)
 	}
@@ -207,24 +212,31 @@ func (p *Project) CheckTopology(t domain.Topology) error {
 	if len(t.Deployments) > 32 {
 		return fmt.Errorf("at most 32 deployments")
 	}
-	for _, d := range t.Deployments {
-		for _, port := range d.Publish {
-			if port != 0 {
-				return fmt.Errorf("agent-generated host ports must be ephemeral (0)")
-			}
-		}
-	}
-	problems := scenario.Validate(toScenario(t), p.Doc.Services)
+	s := toScenario(t)
+	s.Components = p.Seed.Components
+	problems := scenario.Validate(s, p.Doc.Services)
 	if len(problems) > 0 {
 		return problems[0]
 	}
 	return nil
 }
-func (p *Project) ApplyTopology(t domain.Topology) { p.Doc.Scenario = toScenario(t) }
+func (p *Project) ApplyTopology(t domain.Topology) {
+	p.Doc.Scenario = toScenario(t)
+	p.Doc.Scenario.Components = p.Seed.Components
+}
 func (p *Project) configured(c domain.Config) scenario.Scenario {
 	s := toScenario(topologyOf(p.Doc.Scenario))
+	s.Components = p.Seed.Components
 	for name, d := range s.Deployments {
-		d.Env = c.Env[name]
+		d.Env = map[string]string{}
+		for key, value := range c.Env[name] {
+			d.Env[key] = value
+		}
+		for key, value := range p.Seed.Deployments[name].Env {
+			if strings.Contains(value, "${component.") {
+				d.Env[key] = value
+			}
+		}
 		s.Deployments[name] = d
 	}
 	return s
@@ -238,6 +250,14 @@ func (p *Project) CheckConfig(c domain.Config) error {
 			return fmt.Errorf("unknown deployment %s", name)
 		}
 		for key, value := range env {
+			seed := p.Seed.Deployments[name].Env[key]
+			if seed == "" {
+				d := p.Doc.Scenario.Deployments[name]
+				seed = p.Doc.Services[d.Service].Implementations[d.Implementation].Env[key]
+			}
+			if strings.Contains(seed, "${component.") && value != seed {
+				return fmt.Errorf("component binding %s.%s is user-selected and immutable", name, key)
+			}
 			if secretKey(key) {
 				return fmt.Errorf("agent cannot generate credential-like key %s", key)
 			}
@@ -319,8 +339,8 @@ func (p *Project) CheckRuntime(r domain.Runtime) error {
 		if !ok {
 			return fmt.Errorf("unknown probe deployment")
 		}
-		if _, ok = dep.Publish[probe.Interface]; !ok {
-			return fmt.Errorf("probe interface must be published")
+		if _, ok = p.Doc.Services[dep.Service].Implementations[dep.Implementation].Endpoints[probe.Interface]; !ok {
+			return fmt.Errorf("probe interface must be declared by the selected implementation")
 		}
 		contract := p.Doc.Services[dep.Service].Provides[probe.Interface]
 		if len(probe.Contains) > 4096 || len(probe.Request) > 32768 {
@@ -365,7 +385,7 @@ func (p *Project) CheckRuntime(r domain.Runtime) error {
 				return fmt.Errorf("invalid expected gRPC code %q; use OK, Canceled, Unknown, InvalidArgument, DeadlineExceeded, NotFound, AlreadyExists, PermissionDenied, ResourceExhausted, FailedPrecondition, Aborted, OutOfRange, Unimplemented, Internal, Unavailable, DataLoss or Unauthenticated. This is a planned assertion, not a claim of execution", probe.ExpectCode)
 			}
 		default:
-			return fmt.Errorf("probe protocol %s unsupported; publish an HTTP/gRPC entrypoint", contract.Protocol)
+			return fmt.Errorf("probe protocol %s unsupported; declare an HTTP/gRPC entrypoint", contract.Protocol)
 		}
 	}
 	return nil

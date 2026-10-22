@@ -51,6 +51,15 @@ func (c CLI) run(ctx context.Context, args []string) (int, error) {
 	if args[0] == "agent" {
 		return c.agent(ctx, args[1:])
 	}
+	if args[0] == "components" {
+		return c.components(args[1:])
+	}
+	if args[0] == "probe" {
+		return c.probe(ctx, args[1:])
+	}
+	if args[0] == "runtime" {
+		return c.runtimeCommand(ctx, args[1:])
+	}
 	if args[0] == "mock" {
 		return c.mock(ctx, args[1:])
 	}
@@ -318,7 +327,10 @@ func (c CLI) help() {
   doctor                         check Docker/Compose and key presence; no model call
   validate -f scenario.yaml       strict DSL and binding validation
   plan -f scenario.yaml           print resolved execution specification as JSON
+  components list                list editable infrastructure image templates
+  components show NAME           print a components YAML fragment; never starts it
   up -f scenario.yaml             start an isolated run and wait for readiness
+  probe --deployment NAME --interface NAME RUN  HTTP/gRPC/TCP request inside the run
   ps                             show recorded runs and observed container state
   logs RUN                       show current or retained workload logs
   stop RUN                       stop a container group

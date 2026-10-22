@@ -15,6 +15,8 @@
 - DSL is the execution intent. Agents produce reviewable artifacts; deterministic application use cases validate and execute them.
 - Unknown fields, duplicate YAML keys, unresolved references and overrides of injected dependency addresses are errors.
 - Scope resources to a Run; only delete resources owned by that Run. Normal CLI exit must not stop running workloads.
+- Runtime workloads use one internal, isolated Docker bridge per Run, with no host ports or DNS forwarding. Probes run inside that network. Never fall back to a network with egress.
+- Infrastructure components are explicit user-owned Scenario selections. Prefer real images; custom images use the same lifecycle. Agents cannot add/remove/replace these selections.
 - Stop, down and cancellation must have explicit behavior. Preserve diagnostic artifacts before cleanup.
 
 ## Architecture

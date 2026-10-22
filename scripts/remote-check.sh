@@ -15,7 +15,7 @@ fi
 ssh_args=()
 if [[ -n "${LOCALMOCK_SSH_CONTROL:-}" ]]; then ssh_args+=(-S "$LOCALMOCK_SSH_CONTROL"); fi
 ssh "${ssh_args[@]}" "$target" "mkdir -p \"\$HOME/$remote_dir\" \"\$HOME/.cache/localmock-go\""
-tar_args=(--exclude=.git --exclude=bin --exclude=.localmock --exclude=.env --exclude='.env.*' --exclude='._*')
+tar_args=(--exclude=.git --exclude=.idea --exclude=bin --exclude=.localmock --exclude=.env --exclude='.env.*' --exclude='._*')
 if [[ "$(uname -s)" == Darwin ]]; then tar_args+=(--no-xattrs); fi
 COPYFILE_DISABLE=1 tar "${tar_args[@]}" -czf - . |
   ssh "${ssh_args[@]}" "$target" "tar -xzf - -C \"\$HOME/$remote_dir\""

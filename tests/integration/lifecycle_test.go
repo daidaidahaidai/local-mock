@@ -4,9 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"io"
 	"io/fs"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -111,32 +109,14 @@ func (h *harness) start(file string) run {
 }
 func (h *harness) request(id string) {
 	h.t.Helper()
-	for _, r := range h.list() {
-		if r.Run.ID != id {
-			continue
-		}
-		for _, c := range r.Containers {
-			if c.Deployment != "caller" {
-				continue
-			}
-			ports := c.Ports["8080/tcp"]
-			if len(ports) == 0 {
-				h.t.Fatal("no published caller port")
-			}
-			client := http.Client{Timeout: 5 * time.Second}
-			resp, err := client.Get("http://127.0.0.1:" + ports[0].HostPort + "/")
-			if err != nil {
-				h.t.Fatal(err)
-			}
-			b, _ := io.ReadAll(resp.Body)
-			resp.Body.Close()
-			if resp.StatusCode != 200 || !bytes.Contains(b, []byte("hello from mock")) {
-				h.t.Fatalf("HTTP %d: %s", resp.StatusCode, b)
-			}
-			return
-		}
+	b, err := h.command("probe", "--deployment", "caller", "--interface", "api", "--path", "/", id)
+	if err != nil {
+		h.t.Fatal(err)
 	}
-	h.t.Fatal("caller not found")
+	var result struct{ Code, Body string }
+	if err = json.Unmarshal(b, &result); err != nil || result.Code != "200" || !strings.Contains(result.Body, "hello from mock") {
+		h.t.Fatalf("probe: %s %v", b, err)
+	}
 }
 func (h *harness) assertRemoved(id string) {
 	h.t.Helper()

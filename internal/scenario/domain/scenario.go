@@ -15,12 +15,13 @@ type Scenario struct {
 	Name        string
 	Deployments map[string]Deployment
 	Bindings    map[string]map[string]string
+	Components  map[string]catalog.Component
 }
 type Deployment struct {
 	Service        string
 	Implementation string
 	Env            map[string]string
-	Publish        map[string]int // interface -> host port; zero means ephemeral, always loopback
+	Publish        map[string]int // legacy field: rejected by isolated runtime
 }
 type Problem struct {
 	Code    string `json:"code"`
@@ -50,15 +51,18 @@ func Validate(s Scenario, services map[string]catalog.Service) []Problem {
 	if !ValidName(s.Name) {
 		add("INVALID_NAME", "metadata.name", "use lowercase letters, digits and hyphens; start with a letter")
 	}
-	if len(s.Deployments) == 0 {
-		add("EMPTY_SCENARIO", "deployments", "at least one deployment is required")
+	if len(s.Deployments) == 0 && len(s.Components) == 0 {
+		add("EMPTY_SCENARIO", "deployments", "at least one deployment or explicitly selected component is required")
 	}
-	usedPorts := map[int]string{}
+	problems = append(problems, validateComponents(s)...)
 	for _, name := range keys(s.Deployments) {
 		d := s.Deployments[name]
 		path := "deployments." + name
 		if !ValidName(name) {
 			add("INVALID_NAME", path, "invalid deployment name")
+		}
+		if name == "localmock-runner" {
+			add("RESERVED_NAME", path, "reserved for the network-local probe runner")
 		}
 		svc, ok := services[d.Service]
 		if !ok {
@@ -75,19 +79,14 @@ func Validate(s Scenario, services map[string]catalog.Service) []Problem {
 				add("INVALID_ENV", path+".env."+env, "invalid environment variable name")
 			}
 		}
-		for _, endpoint := range keys(d.Publish) {
-			port := d.Publish[endpoint]
-			if _, ok := impl.Endpoints[endpoint]; !ok {
-				add("ENDPOINT_NOT_FOUND", path+".publish."+endpoint, endpoint)
-			}
-			if port < 0 || port > 65535 {
-				add("INVALID_PORT", path+".publish."+endpoint, "port must be 0..65535")
-			}
-			if port > 0 {
-				if previous, ok := usedPorts[port]; ok {
-					add("DUPLICATE_PORT", path+".publish."+endpoint, previous)
+		if len(d.Publish) > 0 {
+			add("HOST_PORT_FORBIDDEN", path+".publish", "remove publish; use localmock probe inside the isolated network")
+		}
+		for _, env := range []map[string]string{impl.Env, d.Env} {
+			for _, key := range keys(env) {
+				if _, err := resolveComponentValue(env[key], s.Components); err != nil {
+					add("INVALID_COMPONENT_REFERENCE", path+".env."+key, err.Error())
 				}
-				usedPorts[port] = name + "." + endpoint
 			}
 		}
 		serviceDependencies := map[string]string{}
@@ -178,6 +177,13 @@ func ResolveEnv(name string, s Scenario, services map[string]catalog.Service) (m
 			}
 			env[key] = resolved
 		}
+	}
+	for key, value := range env {
+		resolved, err := resolveComponentValue(value, s.Components)
+		if err != nil {
+			return nil, err
+		}
+		env[key] = resolved
 	}
 	return env, nil
 }

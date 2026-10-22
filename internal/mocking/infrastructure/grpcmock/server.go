@@ -139,6 +139,10 @@ func Invoke(ctx context.Context, address, contract, fullMethod string, request [
 	if err != nil {
 		return Invocation{}, err
 	}
+	return InvokeDescriptors(ctx, address, descriptors, fullMethod, request)
+}
+
+func InvokeDescriptors(ctx context.Context, address string, descriptors []byte, fullMethod string, request []byte) (Invocation, error) {
 	parts := strings.Split(strings.TrimPrefix(fullMethod, "/"), "/")
 	if len(parts) != 2 {
 		return Invocation{}, fmt.Errorf("method must be package.Service/Method")

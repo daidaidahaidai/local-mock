@@ -23,26 +23,9 @@ func TestBoutiqueCheckoutSuccessAndPaymentFailure(t *testing.T) {
 	}{{"success", "scenario.yaml", true}, {"payment-failure", "payment-failure.yaml", false}} {
 		t.Run(test.name, func(t *testing.T) {
 			r := h.start(filepath.Join(h.root, "examples/online-boutique", test.file))
-			var address string
-			for _, row := range h.list() {
-				if row.Run.ID != r.ID {
-					continue
-				}
-				if len(row.Containers) != 7 {
-					t.Fatalf("expected checkout and six mocks, got %d", len(row.Containers))
-				}
-				for _, c := range row.Containers {
-					if c.Deployment == "checkout" {
-						address = "127.0.0.1:" + c.Ports["5050/tcp"][0].HostPort
-					}
-				}
-			}
-			if address == "" {
-				t.Fatal("checkout port missing")
-			}
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
-			cmd := exec.CommandContext(ctx, h.bin, "rpc", "--address", address, "--proto", filepath.Join(h.root, ".localmock/repos/online-boutique/protos/demo.proto"), "--method", "hipstershop.CheckoutService/PlaceOrder", "--data-file", filepath.Join(h.root, "examples/online-boutique/request.json"))
+			cmd := exec.CommandContext(ctx, h.bin, "probe", "--state", h.state, "--deployment", "checkout", "--interface", "grpc", "--method", "hipstershop.CheckoutService/PlaceOrder", "--data-file", filepath.Join(h.root, "examples/online-boutique/request.json"), r.ID)
 			var stderr bytes.Buffer
 			cmd.Stderr = &stderr
 			out, callErr := cmd.Output()

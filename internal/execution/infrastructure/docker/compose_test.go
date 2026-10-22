@@ -17,7 +17,7 @@ func TestPrepareQuotesEnvironmentAndSnapshotsBuild(t *testing.T) {
 	src := t.TempDir()
 	os.WriteFile(filepath.Join(src, "Dockerfile"), []byte("FROM scratch\n"), 0600)
 	run := domain.Run{ID: "012345678901234567890123", Directory: t.TempDir()}
-	spec := domain.Spec{Workloads: map[string]domain.Workload{"app": {Build: &domain.BuildSpec{Context: src, Dockerfile: "Dockerfile"}, Env: map[string]string{"TOKEN": "literal$VALUE"}, Readiness: []string{"/health"}, Publish: []domain.PublishedPort{{Target: 8080, Published: 0}}}}}
+	spec := domain.Spec{Workloads: map[string]domain.Workload{"app": {Build: &domain.BuildSpec{Context: src, Dockerfile: "Dockerfile"}, Env: map[string]string{"TOKEN": "literal$VALUE"}, Readiness: []string{"/health"}, IPOffset: 100}}}
 	if err := (Driver{}).Prepare(context.Background(), run, spec); err != nil {
 		t.Fatal(err)
 	}
@@ -30,7 +30,7 @@ func TestPrepareQuotesEnvironmentAndSnapshotsBuild(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := c.Services["app"]
-	if s.Environment["TOKEN"] != "literal$$VALUE" || s.Ports[0].HostIP != "127.0.0.1" || s.Labels["io.localmock.run"] != run.ID {
+	if s.Environment["TOKEN"] != "literal$$VALUE" || len(s.Ports) != 0 || len(s.Networks) != 1 || s.DNS[0] != "127.0.0.1" || s.Labels["io.localmock.run"] != run.ID {
 		t.Fatalf("%+v", s)
 	}
 	os.WriteFile(filepath.Join(src, "Dockerfile"), []byte("changed"), 0600)

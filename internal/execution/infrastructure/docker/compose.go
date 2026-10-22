@@ -27,29 +27,42 @@ import (
 type Driver struct {
 	Progress    io.Writer
 	WaitSeconds int
+	Executable  string // optional static CLI path for embedding/integration tests
 }
 type composeFile struct {
 	Services map[string]composeService `yaml:"services"`
 	Networks map[string]network        `yaml:"networks"`
 }
 type network struct {
-	Labels map[string]string `yaml:"labels"`
+	Name     string `yaml:"name"`
+	External bool   `yaml:"external"`
+}
+type attachment struct {
+	IPv4Address string `yaml:"ipv4_address,omitempty"`
 }
 type composeService struct {
-	Image       string            `yaml:"image"`
-	Build       *composeBuild     `yaml:"build,omitempty"`
-	Command     []string          `yaml:"command,omitempty"`
-	Environment map[string]string `yaml:"environment,omitempty"`
-	Ports       []port            `yaml:"ports,omitempty"`
-	Labels      map[string]string `yaml:"labels"`
-	Healthcheck healthcheck       `yaml:"healthcheck"`
-	Init        bool              `yaml:"init"`
-	Restart     string            `yaml:"restart"`
-	Memory      string            `yaml:"mem_limit"`
-	CPUs        float64           `yaml:"cpus"`
-	Pids        int               `yaml:"pids_limit"`
-	Security    []string          `yaml:"security_opt"`
-	Logging     logging           `yaml:"logging"`
+	Image       string                `yaml:"image"`
+	Build       *composeBuild         `yaml:"build,omitempty"`
+	Command     []string              `yaml:"command,omitempty"`
+	Environment map[string]string     `yaml:"environment,omitempty"`
+	Ports       []port                `yaml:"ports,omitempty"`
+	Labels      map[string]string     `yaml:"labels"`
+	Healthcheck healthcheck           `yaml:"healthcheck"`
+	Init        bool                  `yaml:"init"`
+	Restart     string                `yaml:"restart"`
+	Memory      string                `yaml:"mem_limit"`
+	CPUs        float64               `yaml:"cpus"`
+	Pids        int                   `yaml:"pids_limit"`
+	Security    []string              `yaml:"security_opt"`
+	Logging     logging               `yaml:"logging"`
+	Networks    map[string]attachment `yaml:"networks"`
+	DNS         []string              `yaml:"dns"`
+	CapDrop     []string              `yaml:"cap_drop"`
+	Sysctls     map[string]string     `yaml:"sysctls"`
+	DependsOn   map[string]condition  `yaml:"depends_on,omitempty"`
+}
+type condition struct {
+	Condition string `yaml:"condition"`
 }
 type composeBuild struct {
 	Context    string            `yaml:"context"`
@@ -87,8 +100,10 @@ func (d Driver) Prepare(ctx context.Context, run domain.Run, spec domain.Spec) e
 	if err := writeJSON(filepath.Join(run.Directory, "spec.json"), spec); err != nil {
 		return err
 	}
-	labels := map[string]string{"io.localmock.managed": "true", "io.localmock.run": run.ID}
-	c := composeFile{Services: map[string]composeService{}, Networks: map[string]network{"default": {Labels: labels}}}
+	if spec.Network != "" && spec.Network != "isolated" {
+		return fmt.Errorf("only isolated runtime networks are supported")
+	}
+	c := composeFile{Services: map[string]composeService{}, Networks: map[string]network{"sandbox": {Name: run.Project + "-sandbox", External: true}}}
 	inputDir := filepath.Join(run.Directory, "inputs")
 	if err := os.MkdirAll(inputDir, 0700); err != nil {
 		return err
@@ -106,10 +121,25 @@ func (d Driver) Prepare(ctx context.Context, run domain.Run, spec domain.Spec) e
 		}
 	}
 	for name, w := range spec.Workloads {
+		if name == "localmock-runner" || len(w.Publish) > 0 {
+			return fmt.Errorf("reserved runner name or forbidden host port publishing: %s", name)
+		}
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		s := composeService{Image: literal(w.Image), Command: literals(w.Command), Environment: map[string]string{}, Labels: map[string]string{"io.localmock.managed": "true", "io.localmock.run": run.ID, "io.localmock.service": w.Service, "io.localmock.role": w.Role}, Init: true, Restart: "no", Memory: "512m", CPUs: 1, Pids: 256, Security: []string{"no-new-privileges:true"}, Logging: logging{Driver: "json-file", Options: map[string]string{"max-size": "10m", "max-file": "3"}}}
+		isolateService(&s)
+		if w.MemoryMB > 0 {
+			s.Memory = strconv.Itoa(w.MemoryMB) + "m"
+		}
+		if w.Role != "infrastructure" {
+			s.DependsOn = map[string]condition{}
+			for dependency, other := range spec.Workloads {
+				if other.Role == "infrastructure" {
+					s.DependsOn[dependency] = condition{Condition: "service_healthy"}
+				}
+			}
+		}
 		for k, v := range w.Env {
 			s.Environment[k] = literal(v)
 		}
@@ -126,16 +156,13 @@ func (d Driver) Prepare(ctx context.Context, run domain.Run, spec domain.Spec) e
 		}
 		if len(w.MockBundle) > 0 {
 			buildDir := filepath.Join(run.Directory, "build", name)
-			if err := prepareMock(buildDir, w.MockBundle); err != nil {
+			if err := prepareMock(buildDir, w.MockBundle, d.Executable); err != nil {
 				return err
 			}
 			s.Build = &composeBuild{Context: buildDir, Dockerfile: "Dockerfile"}
 			s.Image = "localmock/" + run.ID + "-" + name + ":local"
 		}
-		for _, p := range w.Publish {
-			s.Ports = append(s.Ports, port{Target: p.Target, Published: strconv.Itoa(p.Published), HostIP: "127.0.0.1"})
-		}
-		s.Healthcheck = healthcheck{Test: append([]string{"CMD"}, literals(w.Readiness)...), Interval: "1s", Timeout: "3s", Retries: 30, StartPeriod: "2s"}
+		s.Healthcheck = healthcheck{Test: append([]string{"CMD"}, literals(w.Readiness)...), Interval: "2s", Timeout: "3s", Retries: 60, StartPeriod: "5s"}
 		c.Services[name] = s
 	}
 	b, err := yaml.Marshal(c)
@@ -155,7 +182,17 @@ func (d Driver) Up(ctx context.Context, r domain.Run) error {
 	} else {
 		d.Progress = io.MultiWriter(d.Progress, buildLog)
 	}
+	if err := d.prepareRunner(r); err != nil {
+		return err
+	}
 	if err := d.compose(ctx, r, d.Progress, "build"); err != nil {
+		return err
+	}
+	// Fetch images before any runtime starts. Workloads never receive an egress network.
+	if err := d.compose(ctx, r, d.Progress, "pull", "--ignore-buildable", "--policy", "missing"); err != nil {
+		return err
+	}
+	if err := d.createSandbox(ctx, r); err != nil {
 		return err
 	}
 	wait := d.WaitSeconds
@@ -163,6 +200,9 @@ func (d Driver) Up(ctx context.Context, r domain.Run) error {
 		wait = 90
 	}
 	if err := d.compose(ctx, r, d.Progress, "up", "--detach", "--wait", "--wait-timeout", strconv.Itoa(wait)); err != nil {
+		return err
+	}
+	if err := d.auditSandbox(ctx, r); err != nil {
 		return err
 	}
 	ids, err := d.ownedContainerIDs(ctx, r)
@@ -224,7 +264,7 @@ func (d Driver) Status(ctx context.Context, r domain.Run) (json.RawMessage, erro
 		return json.RawMessage("[]"), nil
 	}
 	var b bytes.Buffer
-	if err = d.command(ctx, &b, append([]string{"inspect", "--format", `{"id":{{json .Id}},"deployment":{{json (index .Config.Labels "com.docker.compose.service")}},"state":{{json .State.Status}},"health":{{if .State.Health}}{{json .State.Health.Status}}{{else}}"none"{{end}},"ports":{{json .NetworkSettings.Ports}}}`}, ids...)...); err != nil {
+	if err = d.command(ctx, &b, append([]string{"inspect", "--format", `{"id":{{json .Id}},"deployment":{{json (index .Config.Labels "com.docker.compose.service")}},"state":{{json .State.Status}},"health":{{if .State.Health}}{{json .State.Health.Status}}{{else}}"none"{{end}},"ports":{{json .NetworkSettings.Ports}},"role":{{json (index .Config.Labels "io.localmock.role")}},"networks":{{json .NetworkSettings.Networks}}}`}, ids...)...); err != nil {
 		return nil, err
 	}
 	lines := bytes.Split(bytes.TrimSpace(b.Bytes()), []byte("\n"))
@@ -256,7 +296,11 @@ func (d Driver) compose(ctx context.Context, r domain.Run, w io.Writer, args ...
 	return d.command(ctx, w, append(base, args...)...)
 }
 func (d Driver) command(ctx context.Context, w io.Writer, args ...string) error {
+	return d.commandInput(ctx, nil, w, args...)
+}
+func (d Driver) commandInput(ctx context.Context, input io.Reader, w io.Writer, args ...string) error {
 	cmd := exec.CommandContext(ctx, "docker", args...)
+	cmd.Stdin = input
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error {
 		if cmd.Process == nil {
@@ -370,13 +414,26 @@ func Names(spec domain.Spec) []string {
 	return names
 }
 
-func prepareMock(dir string, bundle []byte) error {
-	if runtime.GOOS != "linux" {
-		return fmt.Errorf("packaged mock execution currently requires Linux")
-	}
-	executable, err := os.Executable()
-	if err != nil {
+func prepareMock(dir string, bundle []byte, executable string) error {
+	if err := prepareBinary(dir, executable); err != nil {
 		return err
+	}
+	if err := os.WriteFile(filepath.Join(dir, "bundle.json"), bundle, 0644); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte("FROM scratch\nCOPY localmock /localmock\nCOPY bundle.json /bundle.json\nUSER 65532:65532\nENTRYPOINT [\"/localmock\"]\n"), 0600)
+}
+
+func prepareBinary(dir, executable string) error {
+	if runtime.GOOS != "linux" {
+		return fmt.Errorf("network-local tooling and mocks require Linux")
+	}
+	if executable == "" {
+		var err error
+		executable, err = os.Executable()
+		if err != nil {
+			return err
+		}
 	}
 	f, err := elf.Open(executable)
 	if err != nil {
@@ -388,7 +445,7 @@ func prepareMock(dir string, bundle []byte) error {
 		return err
 	}
 	if len(libraries) > 0 {
-		return fmt.Errorf("configured mocks require a static localmock binary; build with CGO_ENABLED=0")
+		return fmt.Errorf("network-local tooling and mocks require a static localmock binary; build with CGO_ENABLED=0")
 	}
 	if err = os.MkdirAll(dir, 0700); err != nil {
 		return err
@@ -410,8 +467,5 @@ func prepareMock(dir string, bundle []byte) error {
 	if closeErr != nil {
 		return closeErr
 	}
-	if err = os.WriteFile(filepath.Join(dir, "bundle.json"), bundle, 0644); err != nil {
-		return err
-	}
-	return os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte("FROM scratch\nCOPY localmock /localmock\nCOPY bundle.json /bundle.json\nUSER 65532:65532\nENTRYPOINT [\"/localmock\"]\n"), 0600)
+	return os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte("FROM scratch\nCOPY localmock /localmock\nUSER 65532:65532\nENTRYPOINT [\"/localmock\"]\n"), 0600)
 }

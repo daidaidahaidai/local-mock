@@ -3,6 +3,7 @@ package yaml
 import (
 	"encoding/json"
 	"fmt"
+	catalog "github.com/daidaidahaidai/local-mock/internal/catalog/domain"
 	"os"
 	"path/filepath"
 
@@ -10,10 +11,18 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+func ComponentFragment(name string, component catalog.Component) ([]byte, error) {
+	return yaml.Marshal(map[string]any{"components": map[string]componentDTO{name: componentToDTO(component)}})
+}
+
 // Export emits ordinary editable DSL. Source and IDL references remain absolute
 // local repository paths; execution later snapshots them through the normal runtime.
 func Export(doc Document, dir string) (string, error) {
 	raw := scenarioDTO{APIVersion: Version, Kind: "Scenario", Metadata: metadata{Name: doc.Scenario.Name}, Deployments: map[string]deploymentDTO{}, Bindings: doc.Scenario.Bindings}
+	raw.Components = map[string]componentDTO{}
+	for name, c := range doc.Scenario.Components {
+		raw.Components[name] = componentToDTO(c)
+	}
 	selected := map[string]map[string]bool{}
 	for name, d := range doc.Scenario.Deployments {
 		value := deploymentDTO{Service: d.Service, Implementation: d.Implementation, Publish: d.Publish}
