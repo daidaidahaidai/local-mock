@@ -1,0 +1,8 @@
+openapi: 3.0.3
+info: {title: Local datastore exercise, version: 1.0.0}
+paths:
+  /exercise:
+    get:
+      description: Demo only; inserts one order and writes/reads its cache entry.
+      responses:
+        '200': {description: SQL and cache read/write result}

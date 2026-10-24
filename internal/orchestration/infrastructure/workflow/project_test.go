@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	catalog "github.com/daidaidahaidai/local-mock/internal/catalog/domain"
 	"github.com/daidaidahaidai/local-mock/internal/catalog/infrastructure/components"
 	probeimpl "github.com/daidaidahaidai/local-mock/internal/execution/infrastructure/probe"
 	"github.com/daidaidahaidai/local-mock/internal/orchestration/domain"
@@ -179,6 +180,9 @@ func TestHTTPProbeDoesNotFollowRedirects(t *testing.T) {
 func TestUserComponentSelectionSurvivesAgentHandoffs(t *testing.T) {
 	p := smokeProject(t)
 	p.Seed.Components = components.Templates()
+	cache := p.Seed.Components["redis"]
+	cache.Initialize = []catalog.Initialization{{Name: "user-seed", Command: []string{"redis-cli", "-e", "SET", "fixture", "user-owned"}}}
+	p.Seed.Components["redis"] = cache
 	p.Doc.Scenario.Components = p.Seed.Components
 	d := p.Seed.Deployments["caller"]
 	d.Env = map[string]string{"REGISTRY": "${component.nacos.http.address}"}
@@ -210,5 +214,9 @@ func TestUserComponentSelectionSurvivesAgentHandoffs(t *testing.T) {
 	}
 	if len(doc.Scenario.Components) != 3 {
 		t.Fatal("components missing from exported DSL")
+	}
+	steps := doc.Scenario.Components["redis"].Initialize
+	if len(steps) != 1 || steps[0].Name != "user-seed" || steps[0].Command[4] != "user-owned" {
+		t.Fatal("user initialization lost during agent handoffs")
 	}
 }

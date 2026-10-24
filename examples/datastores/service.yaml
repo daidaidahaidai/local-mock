@@ -1,0 +1,19 @@
+apiVersion: localmock/v1alpha1
+kind: Service
+metadata:
+  name: orders
+provides:
+  api:
+    protocol: http
+    contract: ./openapi.yaml
+implementations:
+  real:
+    type: source
+    role: real
+    build:
+      context: ./app
+      dockerfile: Dockerfile
+    endpoints:
+      api: {port: 8080}
+    readiness:
+      command: [/app, health]

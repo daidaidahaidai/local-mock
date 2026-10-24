@@ -8,6 +8,9 @@
 - `doctor / validate / plan / components / up / probe / ps / logs / stop / down / version`。
 - 每个 Run 独立 Compose 项目和 internal + isolated 自定义网络；无宿主机端口发布；标签限定资源清理。
 - 显式 components 选择、Nacos/MySQL/Redis 镜像模板、自定义镜像、组件地址引用、固定 IP 槽位。
+- `components add/remove` 原子编辑场景，保留相对路径和注释；支持多个同类实例、空闲 IP 分配，拒绝重名或删除被引用组件。
+- 组件内声明式初始化（命令、stdin 文件、超时），输入哈希与快照、逐步执行记录；初始化成功后启动业务，失败不重试并清理该 Run。
+- MySQL schema/seed 与 Redis string/hash/TTL 初始化，真实 Go 业务 SQL/缓存读写示例。
 - 网络内 HTTP/gRPC/TCP probe，Agent 探测使用相同接口；启动及探测前检查实际隔离配置。
 - SQLite 运行记录、进程间运行锁、状态转换、失败/取消清理及日志保留。
 - Go Agent 工具调用循环、DeepSeek 适配器、轮次/超时限制及独立任务上下文。
@@ -22,7 +25,7 @@
 ## 尚未实现
 
 - 自动识别/改写任意注册中心 SDK 配置，Dubbo Provider/元数据适配，以及注册数据的声明式初始化。组件容器可运行不等于业务自动接入。
-- 组件配置文件挂载、SQL/缓存数据导入、持久数据卷和跨 Run 数据复用。
+- 组件依赖排序、配置文件挂载、运行中数据重置、持久数据卷和跨 Run 数据复用。
 - Repository 发现报告到可执行 Service Manifest 的转换与 Git 拉取。
 - 配置式 HTTP mock、Thrift/自定义 RPC 适配、gRPC 流式/条件/状态规则。
 - 更丰富的测试断言（当前 Agent 流程支持状态码/文本包含）、OpenTelemetry 调用链收集与查询。
@@ -66,3 +69,12 @@
 - 独立 MySQL/Redis 场景及 TCP probe 通过；down 后确认 MySQL 匿名数据卷删除。
 - 单元/race、vet、静态 CLI 构建通过；原有双 Run、stop/down、超时/SIGINT 回滚、六 Agent 成功/断言失败清理，以及 Boutique 下单/支付异常回归通过。
 - Mac 仅编辑和同步；构建与容器测试均在 Debian 执行。本轮未调用付费模型。测试资源按 Run 清理，镜像和构建缓存保留。
+
+2026-10-24，Debian amd64，Docker Engine 29.8.2，Go 1.25 构建容器：
+
+- `components add/remove` 验证通过：新建场景、同类多实例和 IP 分配、重名拒绝、引用保护、未知/重复字段拒绝、失败不覆盖文件，以及注释和相对路径保留。
+- SQL 初始化文件的哈希/快照、DSL 导出及 Agent 交接保留、命令/超时校验、输出截断测试通过。
+- 真实 MySQL/Redis + Go 订单服务验收通过：读取预置商品与缓存、订单写入/读回、缓存写入/读回、hash 与 TTL；删除后重建 Run，订单编号重新从 1 开始。
+- SQL 错误、Redis 错误和步骤超时都阻止业务容器创建，后续步骤未执行；初始化期间 SIGINT 取消也清理该 Run，保留初始化记录。
+- 全量 race、vet、静态 CLI 构建通过；全套 Docker 生命周期、网络隔离、Nacos、六 Agent、Boutique 回归通过。最终输出截断修正后重跑单元/race/vet 和新增初始化 Docker 验收，均通过。
+- 最新源码和二进制同步到 Debian；没有安装 Mac 运行时，没有调用付费模型。验收后无受管理的容器或网络残留。

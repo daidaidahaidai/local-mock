@@ -9,9 +9,18 @@ localmock components list
 localmock components show nacos
 localmock components show mysql
 localmock components show redis
+localmock components add redis --name cache -f scenario.yaml
+localmock components add mysql --name orders-db -f scenario.yaml
+localmock components remove cache -f scenario.yaml
 ```
 
 `show` 只输出可编辑的 YAML 片段，不启动容器，也不修改现有文件。把选中的条目合并到场景唯一的 `components` 字段中，再使用 `validate / plan / up`。这些模板使用测试环境配置：Nacos 关闭客户端认证，MySQL 使用空的本地 root 密码，Redis 不设认证；不复制线上凭据。
+
+`add` 将完整模板写入 DSL；不存在的场景文件会创建为只包含所选组件的场景。可用 `--name` 添加多个同类实例，名称重复则拒绝；IP 槽位优先使用模板值，冲突时选择 10–99 中的空闲槽位并写入文件。`--image` 可覆盖模板镜像，用户需要保证该镜像与模板的命令、环境变量及健康检查兼容。任意其他镜像仍可直接写入 DSL。
+
+`remove` 删除一个组件；如果当前业务或其他组件仍通过 `${component...}` 引用它，或者删除后场景为空，则拒绝修改。添加/删除均在候选文件通过完整校验后原子替换，保留其他字段、注释和相对路径；不会启动、停止或修改已有 Run。YAML 排版可能规范化；编辑命令暂不支持 YAML alias/merge。并发编辑通过场景旁的 `.localmock-lock` 文件互斥；异常终止留下锁时，确认没有编辑进程后可删除该锁。
+
+这些命令允许名称位于选项之前或之后；其他运行命令仍要求选项放在 Run ID 前。
 
 完整例子为 [examples/infrastructure/scenario.yaml](../examples/infrastructure/scenario.yaml)。可以删除不需要的组件；只运行基础组件时允许省略 catalog 和 deployments。它只启动组件，接入业务服务还需要显式配置对应 SDK 地址。
 
@@ -52,7 +61,40 @@ config:
 
 Agent 会保留种子场景中已有的组件地址引用，不能将其改为其他地址；组件环境变量不作为组件上下文发送给模型。组件 Env 仍会保存在本机 DSL 和私有运行产物中，勿放线上秘密。
 
-所有基础组件健康后才启动业务服务。组件之间目前并行启动，存在互相依赖的自定义组件需要自行重试；尚不支持组件初始化脚本、挂载自定义配置文件或数据导入。镜像内配置、环境变量和 command 可用。
+所有基础组件健康且初始化成功后才启动业务服务。组件之间目前并行启动，存在互相依赖的自定义组件需要自行处理启动重试；尚不支持组件依赖排序或挂载自定义配置文件。镜像内配置、环境变量和 command 可用。
+
+## 初始化测试数据
+
+在选中的组件内声明 `initialize` 步骤，例如：
+
+```yaml
+# 以下片段分别放入已有 mysql / redis 组件定义中
+initialize:
+  - name: schema
+    command: [mysql, --host=127.0.0.1, --user=root, --database=localmock]
+    stdin: ./fixtures/schema.sql
+    timeoutSeconds: 30
+```
+
+```yaml
+initialize:
+  - name: greeting
+    command: [redis-cli, -e, SET, 'fixture:greeting', hello]
+  - name: session
+    command: [redis-cli, -e, SET, 'fixture:session', active, EX, '3600']
+  - name: customer
+    command: [redis-cli, -e, HSET, 'fixture:customer', name, Alice]
+```
+
+步骤在**该组件容器内**以 exec 方式执行，使用镜像自带的客户端；无需在宿主机安装 mysql/redis-cli。`command` 是字面量 argv，不做 shell、变量或组件引用展开；需要 shell 时必须显式写出 `sh -c`。Redis 命令使用 `-e`，使服务端错误产生非零退出码；MySQL 不使用会忽略 SQL 错误的 `--force`。自定义镜像按相同机制执行，但必须自行保证命令返回码反映失败。
+
+`stdin` 可省略；填写时相对场景文件解析，必须是普通文件且不超过 4 MiB。加载时记录哈希，启动前验证并复制到 Run 的 inputs，执行只读取已验证的快照，通过 Docker exec 的 stdin 传入；不绑定挂载宿主机文件。SQL 可拆分成 schema、seed 等多个步骤。Redis 批量文件也可通过 `redis-cli --pipe` 接收 RESP 格式输入。
+
+组件按名称排序，组件内部按声明顺序执行，每个组件最多 64 步。每步默认超时 30 秒，可设置 `timeoutSeconds` 为 1–300；`up --timeout` 仍限制整个启动过程。每个新 Run 执行一次，**失败不重试、不启动业务**，保留诊断后清理该 Run。取消和超时也走同一清理流程；中断的 Run 不恢复初始化，新建 Run 重新执行。
+
+执行记录保存到 Run 目录下 `initialization.jsonl`，包含步骤名、开始/成功/失败、输入哈希及最多 32 KiB 的 stdout/stderr；`down` 后仍保留。运行产物可能包含测试数据，请勿在初始化脚本中放置线上凭据。用户的初始化声明会原样经过 Agent 流程保留，不由 Agent 修改。
+
+完整业务示例见 [MySQL/Redis 读写验收](../examples/datastores/README.md)。
 
 ## 网络与地址分配
 

@@ -47,6 +47,20 @@ func Resolve(s domain.Scenario, services map[string]catalog.Service, inputs map[
 			return spec, err
 		}
 		w := execution.Workload{Service: name, Role: "infrastructure", Image: component.Image, Command: component.Command, Env: env, Readiness: component.Readiness, MemoryMB: component.MemoryMB, IPOffset: component.IPOffset, Endpoints: map[string]execution.Endpoint{}}
+		for _, step := range component.Initialize {
+			hash := ""
+			if step.Stdin != "" {
+				hash = inputs[step.Stdin]
+				if len(hash) != 64 {
+					return spec, fmt.Errorf("initialization input was not loaded: %s", step.Stdin)
+				}
+			}
+			timeout := step.TimeoutSeconds
+			if timeout == 0 {
+				timeout = 30
+			}
+			w.Initialize = append(w.Initialize, execution.Initialization{Name: step.Name, Command: step.Command, InputHash: hash, TimeoutSeconds: timeout})
+		}
 		for key, port := range component.Endpoints {
 			w.Endpoints[key] = execution.Endpoint{Port: port, Protocol: "tcp"}
 		}

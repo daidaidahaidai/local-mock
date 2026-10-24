@@ -68,6 +68,30 @@ func validateComponents(s Scenario) []Problem {
 		if c.MemoryMB != 0 && (c.MemoryMB < 64 || c.MemoryMB > 16384) {
 			add(name, "memoryMB must be 64..16384")
 		}
+		steps := map[string]bool{}
+		if len(c.Initialize) > 64 {
+			add(name, "at most 64 initialization steps")
+		}
+		for _, step := range c.Initialize {
+			if !ValidName(step.Name) || steps[step.Name] {
+				add(name, "invalid or duplicate initialization name "+step.Name)
+			}
+			steps[step.Name] = true
+			if len(step.Command) == 0 || strings.TrimSpace(step.Command[0]) == "" {
+				add(name, "initialization command required: "+step.Name)
+			}
+			if step.TimeoutSeconds < 0 || step.TimeoutSeconds > 300 {
+				add(name, "initialization timeoutSeconds must be 1..300 or omitted")
+			}
+			for _, arg := range step.Command {
+				if strings.ContainsRune(arg, 0) {
+					add(name, "initialization command contains NUL")
+				}
+				if strings.Contains(arg, "${component.") {
+					add(name, "initialization commands are literal; use component env for address references")
+				}
+			}
+		}
 		for _, key := range keys(c.Env) {
 			if !envPattern.MatchString(key) {
 				add(name, "invalid environment key "+key)

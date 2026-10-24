@@ -199,6 +199,28 @@ func (d Driver) Up(ctx context.Context, r domain.Run) error {
 	if wait <= 0 {
 		wait = 90
 	}
+	spec, err := loadSpec(r)
+	if err != nil {
+		return err
+	}
+	if hasInitialization(spec) {
+		infra := []string{runnerName}
+		for _, name := range Names(spec) {
+			if spec.Workloads[name].Role == "infrastructure" {
+				infra = append(infra, name)
+			}
+		}
+		args := append([]string{"up", "--detach", "--wait", "--wait-timeout", strconv.Itoa(wait), "--no-deps"}, infra...)
+		if err = d.compose(ctx, r, d.Progress, args...); err != nil {
+			return err
+		}
+		if err = d.auditSandboxWorkloads(ctx, r, infra); err != nil {
+			return err
+		}
+		if err = d.initializeComponents(ctx, r, spec); err != nil {
+			return err
+		}
+	}
 	if err := d.compose(ctx, r, d.Progress, "up", "--detach", "--wait", "--wait-timeout", strconv.Itoa(wait)); err != nil {
 		return err
 	}

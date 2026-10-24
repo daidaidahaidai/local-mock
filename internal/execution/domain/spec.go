@@ -19,6 +19,13 @@ type Workload struct {
 	MemoryMB   int                 `json:"memory_mb,omitempty"`
 	Readiness  []string            `json:"readiness"`
 	MockBundle []byte              `json:"mock_bundle,omitempty"`
+	Initialize []Initialization    `json:"initialize,omitempty"`
+}
+type Initialization struct {
+	Name           string   `json:"name"`
+	Command        []string `json:"command"`
+	InputHash      string   `json:"input_hash,omitempty"`
+	TimeoutSeconds int      `json:"timeout_seconds"`
 }
 type Endpoint struct {
 	Port        int    `json:"port"`

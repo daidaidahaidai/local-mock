@@ -52,7 +52,7 @@ func (c CLI) run(ctx context.Context, args []string) (int, error) {
 		return c.agent(ctx, args[1:])
 	}
 	if args[0] == "components" {
-		return c.components(args[1:])
+		return c.components(ctx, args[1:])
 	}
 	if args[0] == "probe" {
 		return c.probe(ctx, args[1:])
@@ -329,6 +329,8 @@ func (c CLI) help() {
   plan -f scenario.yaml           print resolved execution specification as JSON
   components list                list editable infrastructure image templates
   components show NAME           print a components YAML fragment; never starts it
+  components add NAME -f PATH    add a template to DSL; --name INSTANCE, --image IMAGE
+  components remove NAME -f PATH remove an unreferenced component from DSL
   up -f scenario.yaml             start an isolated run and wait for readiness
   probe --deployment NAME --interface NAME RUN  HTTP/gRPC/TCP request inside the run
   ps                             show recorded runs and observed container state

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	catalog "github.com/daidaidahaidai/local-mock/internal/catalog/domain"
 	"github.com/daidaidahaidai/local-mock/internal/catalog/infrastructure/components"
 	scenarioapp "github.com/daidaidahaidai/local-mock/internal/scenario/application"
 )
@@ -42,5 +43,43 @@ func TestComponentExportAndExecutionIntent(t *testing.T) {
 	}
 	if _, err = Load(file); err == nil {
 		t.Fatal("accepted arbitrary container privilege field")
+	}
+}
+
+func TestInitializationRoundTripAndInputs(t *testing.T) {
+	dir := t.TempDir()
+	stdin := filepath.Join(dir, "seed.sql")
+	if err := os.WriteFile(stdin, []byte("SELECT 42;"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	doc, err := Load("../../../../examples/infrastructure/scenario.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := doc.Scenario.Components["mysql"]
+	c.Initialize = []catalog.Initialization{{Name: "seed", Command: []string{"mysql"}, Stdin: stdin}}
+	doc.Scenario.Components["mysql"] = c
+	path, err := Export(doc, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec, err := scenarioapp.Resolve(loaded.Scenario, loaded.Services, loaded.Files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	step := spec.Workloads["mysql"].Initialize[0]
+	if step.InputHash != loaded.Files[stdin] || len(step.InputHash) != 64 || step.TimeoutSeconds != 30 {
+		t.Fatalf("bad initialization snapshot: %+v", step)
+	}
+	if !reflect.DeepEqual(loaded.Scenario.Components, doc.Scenario.Components) {
+		t.Fatal("initialization lost in exported DSL")
+	}
+	os.Remove(stdin)
+	if _, err = Load(path); err == nil {
+		t.Fatal("missing initialization file accepted")
 	}
 }

@@ -175,6 +175,14 @@ func (d Driver) inspectNetwork(ctx context.Context, name string) (networkInspect
 	return result[0], nil
 }
 func (d Driver) auditSandbox(ctx context.Context, r domain.Run) error {
+	spec, err := loadSpec(r)
+	if err != nil {
+		return err
+	}
+	return d.auditSandboxWorkloads(ctx, r, append(Names(spec), runnerName))
+}
+
+func (d Driver) auditSandboxWorkloads(ctx context.Context, r domain.Run, names []string) error {
 	n, err := d.inspectNetwork(ctx, r.Project+"-sandbox")
 	if err != nil {
 		return err
@@ -186,11 +194,7 @@ func (d Driver) auditSandbox(ctx context.Context, r domain.Run) error {
 	if err != nil {
 		return err
 	}
-	spec, err := loadSpec(r)
-	if err != nil {
-		return err
-	}
-	if len(ids) != len(spec.Workloads)+1 {
+	if len(ids) != len(names) {
 		return fmt.Errorf("sandbox container count differs from execution spec")
 	}
 	var b bytes.Buffer
@@ -198,6 +202,7 @@ func (d Driver) auditSandbox(ctx context.Context, r domain.Run) error {
 		return err
 	}
 	var containers []struct {
+		Config     struct{ Labels map[string]string }
 		HostConfig struct {
 			Privileged   bool
 			NetworkMode  string
@@ -214,7 +219,16 @@ func (d Driver) auditSandbox(ctx context.Context, r domain.Run) error {
 	if err = json.Unmarshal(b.Bytes(), &containers); err != nil {
 		return err
 	}
+	expected := map[string]bool{}
+	for _, name := range names {
+		expected[name] = true
+	}
 	for _, c := range containers {
+		name := c.Config.Labels["com.docker.compose.service"]
+		if !expected[name] {
+			return fmt.Errorf("unexpected or duplicate sandbox workload %s", name)
+		}
+		delete(expected, name)
 		h := c.HostConfig
 		dropped := func(cap string) bool {
 			return slices.Contains(h.CapDrop, cap) || slices.Contains(h.CapDrop, "CAP_"+cap)
@@ -227,6 +241,9 @@ func (d Driver) auditSandbox(ctx context.Context, r domain.Run) error {
 				return fmt.Errorf("container joined a different network")
 			}
 		}
+	}
+	if len(expected) != 0 {
+		return fmt.Errorf("sandbox workloads missing")
 	}
 	return nil
 }

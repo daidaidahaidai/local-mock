@@ -10,3 +10,5 @@
 *.test
 coverage.out
 .DS_Store
+*.localmock-lock
+.localmock-edit-*.yaml

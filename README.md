@@ -41,6 +41,16 @@
 
 `localmock components list` 列出 Nacos、MySQL、Redis 镜像模板；`localmock components show nacos` 输出可合并到 Scenario 的 YAML。Nacos 可同时承担注册中心和配置中心。只有用户在 `components` 中声明的组件会启动，支持直接指定自定义镜像，Agent 不会改变这些选择。
 
+也可以直接编辑场景（不会启动容器）：
+
+```bash
+./bin/localmock components add redis --name cache -f scenario.yaml
+./bin/localmock components add mysql --name orders-db -f scenario.yaml
+./bin/localmock components remove cache -f scenario.yaml
+```
+
+命令写入完整模板并分配空闲 IP 槽位，拒绝重名和删除被引用的组件。组件可声明 `initialize` 步骤，通过 SQL 文件或 Redis 命令初始化数据，全部成功后才启动业务；失败/超时保留记录并清理。完整例子见 [MySQL/Redis 业务读写](examples/datastores/README.md)。
+
 每个 Run 创建 internal + isolated 自定义 Docker 网络，组件使用预留 IP 槽位，业务通过内部 DNS/组件地址引用接入。详情与自定义镜像示例见 [组件与网络](docs/components.md)。旧的 `publish` 配置需要删除，改用 `probe`。
 
 ## 多 Agent 工作流

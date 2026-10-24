@@ -94,14 +94,29 @@ type componentDTO struct {
 	Readiness struct {
 		Command []string `yaml:"command"`
 	} `yaml:"readiness"`
+	Initialize []initializationDTO `yaml:"initialize,omitempty"`
+}
+
+type initializationDTO struct {
+	Name           string   `yaml:"name"`
+	Command        []string `yaml:"command"`
+	Stdin          string   `yaml:"stdin,omitempty"`
+	TimeoutSeconds int      `yaml:"timeoutSeconds,omitempty"`
 }
 
 func componentFromDTO(c componentDTO) catalog.Component {
-	return catalog.Component{Roles: c.Roles, Image: c.Image, Command: c.Command, Env: c.Env, Endpoints: c.Endpoints, IPOffset: c.IPOffset, MemoryMB: c.MemoryMB, Readiness: c.Readiness.Command}
+	v := catalog.Component{Roles: c.Roles, Image: c.Image, Command: c.Command, Env: c.Env, Endpoints: c.Endpoints, IPOffset: c.IPOffset, MemoryMB: c.MemoryMB, Readiness: c.Readiness.Command}
+	for _, step := range c.Initialize {
+		v.Initialize = append(v.Initialize, catalog.Initialization{Name: step.Name, Command: step.Command, Stdin: step.Stdin, TimeoutSeconds: step.TimeoutSeconds})
+	}
+	return v
 }
 func componentToDTO(c catalog.Component) componentDTO {
 	v := componentDTO{Roles: c.Roles, Image: c.Image, Command: c.Command, Env: c.Env, Endpoints: c.Endpoints, IPOffset: c.IPOffset, MemoryMB: c.MemoryMB}
 	v.Readiness.Command = c.Readiness
+	for _, step := range c.Initialize {
+		v.Initialize = append(v.Initialize, initializationDTO{Name: step.Name, Command: step.Command, Stdin: step.Stdin, TimeoutSeconds: step.TimeoutSeconds})
+	}
 	return v
 }
 
@@ -144,7 +159,27 @@ func LoadContext(ctx context.Context, path string) (Document, error) {
 	doc.Scenario = scenario.Scenario{Name: raw.Metadata.Name, Deployments: map[string]scenario.Deployment{}, Bindings: raw.Bindings}
 	doc.Scenario.Components = map[string]catalog.Component{}
 	for name, c := range raw.Components {
-		doc.Scenario.Components[name] = componentFromDTO(c)
+		component := componentFromDTO(c)
+		for i := range component.Initialize {
+			step := &component.Initialize[i]
+			if step.Stdin == "" {
+				continue
+			}
+			step.Stdin = resolve(filepath.Dir(absolute), step.Stdin)
+			info, err := os.Stat(step.Stdin)
+			if err != nil {
+				return doc, fmt.Errorf("component %s initialization %s: %w", name, step.Name, err)
+			}
+			if !info.Mode().IsRegular() {
+				return doc, fmt.Errorf("initialization stdin must be a regular file: %s", step.Stdin)
+			}
+			b, err := readFile(step.Stdin)
+			if err != nil {
+				return doc, err
+			}
+			doc.Files[step.Stdin] = fmt.Sprintf("%x", sha256.Sum256(b))
+		}
+		doc.Scenario.Components[name] = component
 	}
 	for name, d := range raw.Deployments {
 		doc.Scenario.Deployments[name] = scenario.Deployment{Service: d.Service, Implementation: d.Implementation, Env: d.Config.Env, Publish: d.Publish}
@@ -340,19 +375,25 @@ func decode(path string, target any, files map[string]string) error {
 	if err != nil {
 		return err
 	}
-	decoder := yaml.NewDecoder(bytes.NewReader(content))
-	decoder.KnownFields(true)
-	if err = decoder.Decode(target); err != nil {
+	if err = decodeContent(content, target); err != nil {
 		return fmt.Errorf("%s: %w", path, err)
 	}
+	files[path] = fmt.Sprintf("%x", sha256.Sum256(content))
+	return nil
+}
+func decodeContent(content []byte, target any) error {
+	decoder := yaml.NewDecoder(bytes.NewReader(content))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
 	var extra any
-	if err = decoder.Decode(&extra); err != io.EOF {
+	if err := decoder.Decode(&extra); err != io.EOF {
 		if err == nil {
-			return fmt.Errorf("%s: multiple YAML documents are not allowed", path)
+			return fmt.Errorf("multiple YAML documents are not allowed")
 		}
 		return err
 	}
-	files[path] = fmt.Sprintf("%x", sha256.Sum256(content))
 	return nil
 }
 func readFile(path string) ([]byte, error) {

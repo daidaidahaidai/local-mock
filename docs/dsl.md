@@ -42,7 +42,7 @@ inject:
 - `deployments.<name>.implementation`：该服务已定义的实现名称。
 - `deployments.<name>.config.env`：普通配置覆盖。
 - `deployments.<name>.publish`：旧字段，非空时拒绝执行；改用 `localmock probe` 在隔离网络内部访问接口。
-- `components`：用户手动选择的镜像基础组件，字段、地址引用和 IP 槽位见 [组件与网络](components.md)。
+- `components`：用户手动选择的镜像基础组件；可用 `components add/remove` 编辑。`initialize` 声明组件内按序执行的命令、可选 stdin 文件和超时，初始化成功后启动业务。字段、地址引用、IP 槽位和快照规则见 [组件与网络](components.md)。
 - `bindings.<caller>.<dependency>`：目标部署名。
 
 一个调用方对同一逻辑服务只能声明一项依赖；这一项可以包含多个协议接口。所有接口共享同一目标部署。禁止将一个目标服务拆成两个依赖来绕过统一替换规则。

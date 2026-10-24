@@ -1,0 +1,50 @@
+apiVersion: localmock/v1alpha1
+kind: Scenario
+metadata:
+  name: datastore-exercise
+catalog: [./service.yaml]
+deployments:
+  orders:
+    service: orders
+    implementation: real
+    config:
+      env:
+        MYSQL_ADDRESS: "${component.database.sql.address}"
+        REDIS_ADDRESS: "${component.cache.redis.address}"
+components:
+  database:
+    roles: [database]
+    image: mysql:8.4.11
+    ipOffset: 30
+    memoryMB: 1024
+    env:
+      MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
+      MYSQL_DATABASE: localmock
+      MYSQL_ROOT_HOST: "%"
+      MYSQL_INITDB_SKIP_TZINFO: "1"
+    endpoints: {sql: 3306}
+    readiness:
+      command: [mysqladmin, ping, --host=127.0.0.1, --user=root, --silent]
+    initialize:
+      - name: schema
+        command: [mysql, --host=127.0.0.1, --user=root, --database=localmock]
+        stdin: ./fixtures/schema.sql
+      - name: seed
+        command: [mysql, --host=127.0.0.1, --user=root, --database=localmock]
+        stdin: ./fixtures/seed.sql
+  cache:
+    roles: [cache]
+    image: redis:7.4.9-alpine
+    ipOffset: 40
+    memoryMB: 256
+    command: [redis-server, --save, "", --appendonly, "no"]
+    endpoints: {redis: 6379}
+    readiness:
+      command: [redis-cli, ping]
+    initialize:
+      - name: greeting
+        command: [redis-cli, -e, SET, 'fixture:greeting', 'hello from fixtures']
+      - name: customer
+        command: [redis-cli, -e, HSET, 'fixture:customer', name, Alice, tier, local]
+      - name: session
+        command: [redis-cli, -e, SET, 'fixture:session', active, EX, '3600']

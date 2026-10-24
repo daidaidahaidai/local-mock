@@ -55,3 +55,19 @@ func TestPublishingHostPortsIsRejected(t *testing.T) {
 	s.Deployments["caller"] = d
 	assertProblem(t, Validate(s, c), "HOST_PORT_FORBIDDEN")
 }
+
+func TestInitializationRules(t *testing.T) {
+	for _, steps := range [][]catalog.Initialization{
+		{{Name: "seed"}},
+		{{Name: "seed", Command: []string{"redis-cli"}, TimeoutSeconds: -1}},
+		{{Name: "seed", Command: []string{"redis-cli"}, TimeoutSeconds: 301}},
+		{{Name: "seed", Command: []string{"redis-cli"}}, {Name: "seed", Command: []string{"redis-cli"}}},
+		{{Name: "seed", Command: []string{"redis-cli", "${component.registry.rpc.host}"}}},
+	} {
+		s, services := fixture()
+		c := componentFixture()
+		c.Initialize = steps
+		s.Components = map[string]catalog.Component{"registry": c}
+		assertProblem(t, Validate(s, services), "INVALID_COMPONENT")
+	}
+}
